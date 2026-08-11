@@ -1213,7 +1213,8 @@ app.post('/api/snapshots', (req: Request, res: Response) => {
     const snapshot: Snapshot = {
       name,
       // Snapshots are historical values, not aliases to live mutable elements.
-      // Bound-arrow rerouting mutates arrow objects in place.
+      // Bound-arrow rerouting mutates arrow objects in place. structuredClone
+      // is available across the supported Node.js >=20 runtime range.
       elements: structuredClone(Array.from(elements.values())),
       createdAt: new Date().toISOString()
     };
