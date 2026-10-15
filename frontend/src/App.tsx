@@ -17,6 +17,7 @@ import type {
 import { convertMermaidToExcalidraw, DEFAULT_MERMAID_CONFIG } from './utils/mermaidConverter'
 import { cleanElementForExcalidraw, prepareServerScene, assertScenePreserved } from './utils/scene'
 import { preloadCanvasFonts } from './utils/fonts'
+import { IconPanel } from './IconPanel'
 import type { ServerElement } from './utils/scene'
 import type { MermaidConfig } from '@excalidraw/mermaid-to-excalidraw'
 
@@ -242,6 +243,7 @@ function App(): JSX.Element {
   const syncedVersionRef = useRef<number>(0)
   const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const loadedOnceRef = useRef<boolean>(false)
+  const [iconsOpen, setIconsOpen] = useState(false)
   useEffect(() => {
     fetch('/api/projects').then(r => (r.ok ? r.json() : null)).then(d => {
       if (d && !projectRef.current) projectRef.current = d.current
@@ -1108,6 +1110,7 @@ function App(): JSX.Element {
       {/* Header */}
       <div className="header">
         <ProjectPicker beforeSwitch={() => syncToBackend({ silent: true })} />
+        <button className={`btn-secondary icons-toggle ${iconsOpen ? 'on' : ''}`} onClick={() => setIconsOpen(o => !o)}>Icons</button>
         <div className="controls">
           <div className="status">
             <div className={`status-dot ${isConnected ? 'status-connected' : 'status-disconnected'}`}></div>
@@ -1191,6 +1194,7 @@ function App(): JSX.Element {
               }
             }}
           />
+          {iconsOpen && <IconPanel api={excalidrawAPI as ExcalidrawImperativeAPI | null} onClose={() => setIconsOpen(false)} />}
         </div>
       </div>
     </div>
