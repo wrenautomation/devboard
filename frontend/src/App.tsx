@@ -1114,34 +1114,13 @@ function App(): JSX.Element {
         <div className="controls">
           <div className="status">
             <div className={`status-dot ${isConnected ? 'status-connected' : 'status-disconnected'}`}></div>
-            <span>{isConnected ? 'Connected' : 'Disconnected'}</span>
-          </div>
-
-          {/* Sync Controls */}
-          <div className="sync-controls">
-            <button
-              className={`btn-primary ${syncStatus === 'syncing' ? 'btn-loading' : ''}`}
-              onClick={() => void syncToBackend()}
-              disabled={syncStatus === 'syncing' || !excalidrawAPI || !isConnected || sceneLoadStatus !== 'ready'}
-            >
-              {syncStatus === 'syncing' && <span className="spinner"></span>}
-              {syncStatus === 'syncing' ? 'Syncing...' : 'Sync to Backend'}
-            </button>
-
-            {/* Sync Status */}
-            <div className="sync-status">
-              {syncStatus === 'success' && (
-                <span className="sync-success">✅ Synced</span>
-              )}
-              {syncStatus === 'error' && (
-                <span className="sync-error">❌ Sync Failed</span>
-              )}
-              {lastSyncTime && syncStatus === 'idle' && (
-                <span className="sync-time">
-                  Last sync: {formatSyncTime(lastSyncTime)}
-                </span>
-              )}
-            </div>
+            {/* Local patch: saving is automatic; this only reports it. */}
+            <span className="save-state" role="status">
+              {!isConnected ? 'Offline · kept on this device'
+                : syncStatus === 'syncing' ? 'Saving…'
+                : syncStatus === 'error' ? 'Not saved yet · kept on this device'
+                : 'Saved'}
+            </span>
           </div>
 
           <button className="btn-secondary" onClick={clearCanvas} disabled={!isConnected || sceneLoadStatus !== 'ready'}>Clear Canvas</button>
