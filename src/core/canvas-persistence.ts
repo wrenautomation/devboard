@@ -955,6 +955,42 @@ export function commitCanvasMutation<T>(mutate: () => T): T {
   return value;
 }
 
+// Local patch: open another data directory in this process (project switch). Every mutation is
+// synchronous, so nothing interleaves: drop the old lock, take the new one, load its checkpoint.
+export function switchDurableDirectory(directory: string): DurableStateStatus {
+  if (persistenceUnavailable) {
+    throw new CanvasPersistenceError(new Error('Canvas persistence requires a restart after a publication failure'));
+  }
+  const previous = process.env.EXCALIDRAW_DATA_DIR;
+  releaseDurableStateLock();
+  process.env.EXCALIDRAW_DATA_DIR = directory;
+  initializedAuthority = undefined;
+  try {
+    acquireDurableStateLock();
+    return loadDurableState();
+  } catch (error) {
+    releaseDurableStateLock();
+    process.env.EXCALIDRAW_DATA_DIR = previous;
+    initializedAuthority = undefined;
+    acquireDurableStateLock();
+    loadDurableState();
+    throw error;
+  }
+}
+
+// Local patch: rename the open data directory (project rename). The lock is path-based, so drop it,
+// move the folder, then take it again at the new path.
+export function renameDurableDirectory(directory: string): DurableStateStatus {
+  const current = durableStateDirectory();
+  if (!current) throw new Error('Canvas persistence is off');
+  releaseDurableStateLock();
+  renameSync(current, directory);
+  process.env.EXCALIDRAW_DATA_DIR = directory;
+  initializedAuthority = undefined;
+  acquireDurableStateLock();
+  return loadDurableState();
+}
+
 export function loadDurableState(): DurableStateStatus {
   if (initializedAuthority !== undefined) {
     throw new Error('Canvas durable state was already loaded in this process');

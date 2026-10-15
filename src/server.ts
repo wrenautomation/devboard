@@ -41,6 +41,8 @@ import {
   durableStatePath,
   loadDurableState,
   releaseDurableStateLock,
+  switchDurableDirectory,
+  renameDurableDirectory,
 } from './core/canvas-persistence.js';
 
 function mutationErrorStatus(error: unknown, fallback: number): number {
@@ -1443,8 +1445,8 @@ app.get('/', (req: Request, res: Response) => {
 
 // Health check endpoint
 // Local patch: projects. run-canvas.sh sets EXCALIDRAW_PROJECTS_DIR (one folder per project) and
-// EXCALIDRAW_CURRENT_FILE (the open one). Opening another writes the file and exits; launchd restarts
-// the server on that project and the page reloads.
+// EXCALIDRAW_CURRENT_FILE (the open one).
+// Opening another swaps the data directory in this process and sends open tabs the new scene.
 const PROJECTS_DIR = process.env.EXCALIDRAW_PROJECTS_DIR;
 const CURRENT_FILE = process.env.EXCALIDRAW_CURRENT_FILE;
 const PROJECT_NAME = /^[a-z0-9][a-z0-9-]{0,40}$/;
@@ -1461,12 +1463,77 @@ app.post('/api/projects/open', (req: Request, res: Response) => {
   if (!PROJECTS_DIR || !CURRENT_FILE) return res.status(404).json({ success: false, error: 'projects off' });
   const name = String(req.body?.name ?? '');
   if (!PROJECT_NAME.test(name)) return res.status(400).json({ success: false, error: 'name: lowercase letters, digits, dashes' });
-  if (name === currentProject()) return res.json({ success: true, current: name, restarting: false });
+  if (name === currentProject()) return res.json({ success: true, current: name });
   projectFs.mkdirSync(path.join(PROJECTS_DIR, name), { recursive: true });
+  try {
+    switchDurableDirectory(path.join(PROJECTS_DIR, name));
+  } catch (error) {
+    logger.error(`Could not open project "${name}"`, error);
+    return res.status(500).json({ success: false, error: (error as Error).message });
+  }
   projectFs.writeFileSync(CURRENT_FILE, name + '\n');
-  logger.info(`Opening project "${name}"; restarting`);
-  res.on('finish', () => setTimeout(() => process.kill(process.pid, 'SIGTERM'), 100));
-  res.json({ success: true, current: name, restarting: true });
+  logger.info(`Opened project "${name}" (${elements.size} elements)`);
+  const filesObj: Record<string, ExcalidrawFile> = {};
+  files.forEach((f, id) => { filesObj[id] = f; });
+  broadcast({ type: 'project_opened', project: name } as any);
+  broadcast({
+    type: 'initial_elements',
+    elements: Array.from(elements.values()),
+    ...(files.size > 0 ? { files: filesObj } : {})
+  } as InitialElementsMessage & { files?: Record<string, ExcalidrawFile> });
+  res.json({ success: true, current: name });
+});
+
+// Rename any project; the open one is moved in place.
+app.post('/api/projects/rename', (req: Request, res: Response) => {
+  if (!PROJECTS_DIR || !CURRENT_FILE) return res.status(404).json({ success: false, error: 'projects off' });
+  const from = String(req.body?.from ?? ''), to = String(req.body?.to ?? '');
+  if (!PROJECT_NAME.test(from) || !PROJECT_NAME.test(to)) return res.status(400).json({ success: false, error: 'name: lowercase letters, digits, dashes' });
+  if (!projectFs.existsSync(path.join(PROJECTS_DIR, from))) return res.status(404).json({ success: false, error: `no project ${from}` });
+  if (projectFs.existsSync(path.join(PROJECTS_DIR, to))) return res.status(409).json({ success: false, error: `${to} already exists` });
+  try {
+    if (from === currentProject()) {
+      renameDurableDirectory(path.join(PROJECTS_DIR, to));
+      projectFs.writeFileSync(CURRENT_FILE, to + '\n');
+    } else {
+      projectFs.renameSync(path.join(PROJECTS_DIR, from), path.join(PROJECTS_DIR, to));
+    }
+  } catch (error) {
+    logger.error(`Could not rename project "${from}"`, error);
+    return res.status(500).json({ success: false, error: (error as Error).message });
+  }
+  logger.info(`Renamed project "${from}" to "${to}"`);
+  broadcast({ type: 'projects_changed' } as any);
+  res.json({ success: true, current: currentProject() });
+});
+// Delete = move to ../trash/<name>-<time>. Deleting the open one opens another first.
+app.post('/api/projects/delete', (req: Request, res: Response) => {
+  if (!PROJECTS_DIR || !CURRENT_FILE) return res.status(404).json({ success: false, error: 'projects off' });
+  const name = String(req.body?.name ?? '');
+  if (!PROJECT_NAME.test(name) || !projectFs.existsSync(path.join(PROJECTS_DIR, name))) return res.status(404).json({ success: false, error: `no project ${name}` });
+  const others = projectFs.readdirSync(PROJECTS_DIR, { withFileTypes: true })
+    .filter(d => d.isDirectory() && PROJECT_NAME.test(d.name) && d.name !== name).map(d => d.name).sort();
+  try {
+    if (name === currentProject()) {
+      const next = others[0] ?? 'main';
+      projectFs.mkdirSync(path.join(PROJECTS_DIR, next), { recursive: true });
+      switchDurableDirectory(path.join(PROJECTS_DIR, next));
+      projectFs.writeFileSync(CURRENT_FILE, next + '\n');
+      const filesObj: Record<string, ExcalidrawFile> = {};
+      files.forEach((f, id) => { filesObj[id] = f; });
+      broadcast({ type: 'project_opened', project: next } as any);
+      broadcast({ type: 'initial_elements', elements: Array.from(elements.values()), ...(files.size > 0 ? { files: filesObj } : {}) } as InitialElementsMessage & { files?: Record<string, ExcalidrawFile> });
+    }
+    const trash = path.join(PROJECTS_DIR, '..', 'trash');
+    projectFs.mkdirSync(trash, { recursive: true });
+    projectFs.renameSync(path.join(PROJECTS_DIR, name), path.join(trash, `${name}-${new Date().toISOString().replace(/[:.]/g, '-')}`));
+  } catch (error) {
+    logger.error(`Could not delete project "${name}"`, error);
+    return res.status(500).json({ success: false, error: (error as Error).message });
+  }
+  logger.info(`Deleted project "${name}" (moved to trash)`);
+  broadcast({ type: 'projects_changed' } as any);
+  res.json({ success: true, current: currentProject() });
 });
 
 app.get('/health', (req: Request, res: Response) => {

@@ -50,7 +50,12 @@ const libraryAdapter: LibraryPersistenceAdapter = {
       })
       if (items) return { libraryItems: items }
       const raw = window.localStorage?.getItem(LIBRARY_STORAGE_KEY)
-      return raw ? { libraryItems: JSON.parse(raw) } : null
+      if (raw) return { libraryItems: JSON.parse(raw) }
+      // First visit: start with the canvas's own pack (brand logos, system design, stickies).
+      const pack = await fetch('/lib/wren.excalidrawlib').then(r => (r.ok ? r.json() : null)).catch(() => null)
+      if (!pack?.libraryItems) return null
+      await libraryAdapter.save({ libraryItems: pack.libraryItems })
+      return { libraryItems: pack.libraryItems }
     } catch (error) {
       console.warn('Failed to read library:', error)
       return null
@@ -73,49 +78,83 @@ const libraryAdapter: LibraryPersistenceAdapter = {
 }
 
 
-// Local patch: project picker. Each project is its own saved scene on the Mac; switching restarts
-// the canvas server on the other one, then this page reloads into it.
+// Local patch: drafts. Edits the Mac hasn't confirmed are kept in this browser per project, so a
+// dropped connection, a killed tab or a reload never loses them; they go up on the next connect.
+type Draft = { elements: unknown[]; version: number; at: number }
+const draftKey = (project: string) => `draft:${project}`
+const idb = async <T,>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> => {
+  const db = await libraryDb()
+  return new Promise<T>((resolve, reject) => {
+    const req = run(db.transaction('kv', mode).objectStore('kv'))
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+}
+const readDraft = (project: string) => idb<Draft | undefined>('readonly', st => st.get(draftKey(project))).catch(() => undefined)
+const writeDraft = (project: string, draft: Draft) => idb('readwrite', st => st.put(draft, draftKey(project))).catch(() => undefined)
+const dropDraft = (project: string) => idb('readwrite', st => st.delete(draftKey(project))).catch(() => undefined)
+// Changes whenever any element is added, edited or deleted (Excalidraw bumps `version` on each edit).
+const sceneVersion = (els: readonly { version: number }[]): number =>
+  els.reduce((sum, el) => sum + el.version, 0) * 1000 + els.length
+
+// Local patch: project picker. Each project is its own saved scene on the Mac. Opening one swaps
+// it in on the server, which sends this tab the new scene; no reload.
+const postJson = async (url: string, body: unknown) => {
+  const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  const d = await r.json().catch(() => ({}))
+  if (!r.ok || !d.success) throw new Error(d.error || `HTTP ${r.status}`)
+  return d
+}
+const toProjectName = (typed: string) =>
+  typed.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
+
 function ProjectPicker({ beforeSwitch }: { beforeSwitch: () => Promise<void> }) {
   const [state, setState] = useState<{ current: string; projects: string[] } | null>(null)
   const [busy, setBusy] = useState(false)
-  useEffect(() => {
+  const refresh = () =>
     fetch('/api/projects').then(r => (r.ok ? r.json() : null)).then(d => d && setState(d)).catch(() => {})
+  useEffect(() => {
+    void refresh()
+    const onChange = () => void refresh()
+    window.addEventListener('canvas-project', onChange)
+    window.addEventListener('canvas-projects-changed', onChange)
+    return () => {
+      window.removeEventListener('canvas-project', onChange)
+      window.removeEventListener('canvas-projects-changed', onChange)
+    }
   }, [])
   if (!state) return <h1>Excalidraw Canvas</h1>
-  const open = async (value: string) => {
-    let name = value
-    if (value === '__new__') {
-      const typed = window.prompt('New project name (lowercase, dashes):', '')
-      if (!typed) return
-      name = typed.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '')
-      if (!name) return
-    }
-    if (name === state.current) return
+  const run = async (work: () => Promise<unknown>) => {
     setBusy(true)
-    try {
-      await beforeSwitch()
-      const r = await fetch('/api/projects/open', {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }),
-      })
-      const d = await r.json()
-      if (!d.success) throw new Error(d.error)
-      for (let i = 0; i < 40; i++) {
-        await new Promise(res => setTimeout(res, 500))
-        const p = await fetch('/api/projects').then(x => (x.ok ? x.json() : null)).catch(() => null)
-        if (p?.current === name) break
+    try { await work() } catch (error) {
+      window.alert(error instanceof Error ? error.message : String(error))
+    } finally { setBusy(false); void refresh() }
+  }
+  const choose = (value: string) => {
+    const current = state.current
+    if (value === '__new__') {
+      const name = toProjectName(window.prompt('New project name:', '') || '')
+      if (name) void run(async () => { await beforeSwitch(); await postJson('/api/projects/open', { name }) })
+    } else if (value === '__rename__') {
+      const to = toProjectName(window.prompt(`Rename "${current}" to:`, current) || '')
+      if (to && to !== current) void run(() => postJson('/api/projects/rename', { from: current, to }))
+    } else if (value === '__delete__') {
+      if (window.confirm(`Delete "${current}"? It moves to the trash folder on the Mac.`)) {
+        void run(() => postJson('/api/projects/delete', { name: current }))
       }
-      window.location.reload()
-    } catch (error) {
-      setBusy(false)
-      window.alert(`Could not open project: ${error instanceof Error ? error.message : error}`)
+    } else if (value !== current) {
+      void run(async () => { await beforeSwitch(); await postJson('/api/projects/open', { name: value }) })
     }
   }
   return (
     <label className="project-picker">
       <span>Project</span>
-      <select value={state.current} disabled={busy} onChange={e => void open(e.target.value)}>
+      <select value={state.current} disabled={busy} onChange={e => choose(e.target.value)}>
         {state.projects.map(p => <option key={p} value={p}>{p}</option>)}
+        <option disabled>──────────</option>
         <option value="__new__">+ New project…</option>
+        <option value="__rename__">Rename this project…</option>
+        <option value="__delete__">Delete this project…</option>
       </select>
       {busy && <span className="spinner"></span>}
     </label>
@@ -199,6 +238,18 @@ function App(): JSX.Element {
     },
   })
   const [isConnected, setIsConnected] = useState<boolean>(false)
+  const projectRef = useRef<string | null>(null)
+  const syncedVersionRef = useRef<number>(0)
+  const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const loadedOnceRef = useRef<boolean>(false)
+  useEffect(() => {
+    fetch('/api/projects').then(r => (r.ok ? r.json() : null)).then(d => {
+      if (d && !projectRef.current) projectRef.current = d.current
+    }).catch(() => {})
+    const onProject = (e: Event) => { projectRef.current = (e as CustomEvent<string>).detail }
+    window.addEventListener('canvas-project', onProject)
+    return () => window.removeEventListener('canvas-project', onProject)
+  }, [])
   const websocketRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -259,12 +310,91 @@ function App(): JSX.Element {
     suppressAutoSyncCountRef.current += 1
     try {
       api.updateScene(scene)
+      syncedVersionRef.current = sceneVersion(api.getSceneElementsIncludingDeleted())
     } finally {
       setTimeout(() => {
         suppressAutoSyncCountRef.current = Math.max(0, suppressAutoSyncCountRef.current - 1)
       }, 0)
     }
   }
+
+  const isDirty = (): boolean => {
+    const api = excalidrawAPIRef.current
+    return !!api && loadedOnceRef.current &&
+      sceneVersion(api.getSceneElementsIncludingDeleted()) !== syncedVersionRef.current
+  }
+  const saveDraftNow = (): void => {
+    const api = excalidrawAPIRef.current, project = projectRef.current
+    if (!api || !project || !isDirty()) return
+    void writeDraft(project, {
+      elements: api.getSceneElementsIncludingDeleted().filter(el => !el.isDeleted),
+      version: sceneVersion(api.getSceneElementsIncludingDeleted()), at: Date.now(),
+    })
+  }
+  // A full server scene arrived while this tab holds unsaved edits (reconnect). Same project: the
+  // tab wins and pushes. Project changed meanwhile: the edits stay as that project's draft.
+  const reconcileUnsaved = async (generation: number): Promise<boolean> => {
+    if (!isDirty()) return false
+    saveDraftNow()
+    const p = await fetch('/api/projects').then(r => (r.ok ? r.json() : null)).catch(() => null)
+    if (p && projectRef.current && p.current !== projectRef.current) {
+      projectRef.current = p.current
+      window.dispatchEvent(new CustomEvent('canvas-project', { detail: p.current }))
+      return false
+    }
+    if (generation !== sceneGenerationRef.current) return true
+    sceneLoadStatusRef.current = 'ready'
+    setSceneLoadStatus('ready')
+    await syncToBackend({ silent: true })
+    return true
+  }
+  // A draft the Mac never got, read once per project before its first scene is shown.
+  const draftLoadRef = useRef<Promise<Draft | undefined> | null>(null)
+  const loadDraftOnce = (): Promise<Draft | undefined> => {
+    if (!draftLoadRef.current) {
+      draftLoadRef.current = (async () => {
+        if (!projectRef.current) {
+          const p = await fetch('/api/projects').then(r => (r.ok ? r.json() : null)).catch(() => null)
+          if (p && !projectRef.current) projectRef.current = p.current
+        }
+        return projectRef.current ? readDraft(projectRef.current) : undefined
+      })()
+    }
+    return draftLoadRef.current
+  }
+  // Show the server scene, or this project's unsaved draft in its place; the draft stays dirty
+  // (and stored) until a save is confirmed.
+  const applyLoadedScene = async (
+    incoming: readonly Partial<ExcalidrawElement>[], generation: number, files?: Record<string, unknown>
+  ): Promise<void> => {
+    const draft = await loadDraftOnce()
+    if (generation !== sceneGenerationRef.current) return
+    if (!draft) { applyServerScene(incoming, generation, files); return }
+    draftLoadRef.current = Promise.resolve(undefined)
+    applyServerScene(draft.elements as Partial<ExcalidrawElement>[], generation, files)
+    syncedVersionRef.current = -1
+    console.log(`Restored ${draft.elements.length} unsaved elements for ${projectRef.current}`)
+    await syncToBackend({ silent: true })
+  }
+
+  // Leaving the tab (app switch, lock screen, close): keep a draft and save now, without the
+  // 1.2s debounce. iPad Safari suspends hidden tabs, so a pending timer may never fire.
+  const flushOnLeaveRef = useRef<() => void>(() => {})
+  flushOnLeaveRef.current = () => {
+    if (!isDirty()) return
+    saveDraftNow()
+    void syncToBackend({ silent: true })
+  }
+  useEffect(() => {
+    const onHide = () => { if (document.visibilityState === 'hidden') flushOnLeaveRef.current() }
+    const onPageHide = () => flushOnLeaveRef.current()
+    document.addEventListener('visibilitychange', onHide)
+    window.addEventListener('pagehide', onPageHide)
+    return () => {
+      document.removeEventListener('visibilitychange', onHide)
+      window.removeEventListener('pagehide', onPageHide)
+    }
+  }, [])
 
   const applyServerScene = (
     incoming: readonly Partial<ExcalidrawElement>[],
@@ -291,6 +421,7 @@ function App(): JSX.Element {
     }
     sceneLoadStatusRef.current = 'ready'
     setSceneLoadStatus('ready')
+    loadedOnceRef.current = true
   }
 
   useEffect(() => {
@@ -370,7 +501,8 @@ function App(): JSX.Element {
       }
       await preloadCanvasFonts()
       if (generation !== sceneGenerationRef.current) return
-      applyServerScene(result.elements.map(cleanElementForExcalidraw), generation, filesResult.files)
+      if (await reconcileUnsaved(generation)) return
+      await applyLoadedScene(result.elements.map(cleanElementForExcalidraw), generation, filesResult.files)
     } catch (error) {
       failSceneLoad(error, generation)
     }
@@ -476,7 +608,8 @@ function App(): JSX.Element {
             // Measure the first scene with the real fonts, not a fallback
             await preloadCanvasFonts()
             if (generation !== sceneGenerationRef.current) return
-            applyServerScene(data.elements.map(cleanElementForExcalidraw), generation, (data as any).files)
+            if (await reconcileUnsaved(generation)) return
+            await applyLoadedScene(data.elements.map(cleanElementForExcalidraw), generation, (data as any).files)
           }
           break
 
@@ -535,6 +668,21 @@ function App(): JSX.Element {
 
         case 'sync_status':
           console.log(`Server sync status: ${data.count} elements`)
+          break
+
+        case 'project_opened':
+          // Edits for the old project that never reached the Mac stay as its draft.
+          saveDraftNow()
+          if (excalidrawAPIRef.current) {
+            syncedVersionRef.current = sceneVersion(excalidrawAPIRef.current.getSceneElementsIncludingDeleted())
+          }
+          projectRef.current = (data as any).project
+          draftLoadRef.current = null
+          window.dispatchEvent(new CustomEvent('canvas-project', { detail: (data as any).project }))
+          break
+
+        case 'projects_changed':
+          window.dispatchEvent(new CustomEvent('canvas-projects-changed'))
           break
 
         case 'canvas_cleared':
@@ -844,6 +992,7 @@ function App(): JSX.Element {
     try {
       // 1. Get current elements
       const currentElements = api.getSceneElements()
+      const sentVersion = sceneVersion(api.getSceneElementsIncludingDeleted())
       console.log(`Syncing ${currentElements.length} elements to backend`)
 
       // Filter out deleted elements
@@ -886,6 +1035,10 @@ function App(): JSX.Element {
 
       if (response.ok) {
         const result: ApiResponse = await response.json()
+        syncedVersionRef.current = sentVersion
+        if (projectRef.current && sceneVersion(api.getSceneElementsIncludingDeleted()) === sentVersion) {
+          void dropDraft(projectRef.current)
+        }
         setLastSyncTime(new Date())
         console.log(`Sync successful: ${result.count} elements synced`)
 
@@ -1027,6 +1180,9 @@ function App(): JSX.Element {
                 }
               }
               scheduleAutoSync()
+              if (!draftTimerRef.current && isDirty()) {
+                draftTimerRef.current = setTimeout(() => { draftTimerRef.current = null; saveDraftNow() }, 400)
+              }
             }}
             initialData={{
               elements: [],
