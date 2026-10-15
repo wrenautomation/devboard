@@ -31,23 +31,43 @@ const LIBRARY_STORAGE_KEY = 'excalidraw-canvas-library'
  * on every reload, which makes it useless, and `useHandleLibrary` below needs one
  * to accept installs in the first place.
  */
+// Local patch: IndexedDB, not localStorage. Safari's 5MB localStorage quota can't hold a big icon pack.
+// Reads the old localStorage copy once, if there is one.
+const libraryDb = (): Promise<IDBDatabase> => new Promise((resolve, reject) => {
+  const req = indexedDB.open('excalidraw-canvas', 1)
+  req.onupgradeneeded = () => req.result.createObjectStore('kv')
+  req.onsuccess = () => resolve(req.result)
+  req.onerror = () => reject(req.error)
+})
 const libraryAdapter: LibraryPersistenceAdapter = {
-  load: () => {
+  load: async () => {
     try {
+      const db = await libraryDb()
+      const items = await new Promise<any>((resolve, reject) => {
+        const req = db.transaction('kv').objectStore('kv').get(LIBRARY_STORAGE_KEY)
+        req.onsuccess = () => resolve(req.result)
+        req.onerror = () => reject(req.error)
+      })
+      if (items) return { libraryItems: items }
       const raw = window.localStorage?.getItem(LIBRARY_STORAGE_KEY)
       return raw ? { libraryItems: JSON.parse(raw) } : null
     } catch (error) {
-      console.warn('Failed to read library from localStorage:', error)
+      console.warn('Failed to read library:', error)
       return null
     }
   },
-  save: (data: LibraryPersistedData) => {
+  save: async (data: LibraryPersistedData) => {
     try {
-      window.localStorage?.setItem(LIBRARY_STORAGE_KEY, JSON.stringify(data.libraryItems))
+      const db = await libraryDb()
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction('kv', 'readwrite')
+        tx.objectStore('kv').put(data.libraryItems, LIBRARY_STORAGE_KEY)
+        tx.oncomplete = () => resolve()
+        tx.onerror = () => reject(tx.error)
+      })
+      window.localStorage?.removeItem(LIBRARY_STORAGE_KEY)
     } catch (error) {
-      // Most likely the 5MB quota, which a large icon pack can exceed. The
-      // library stays usable for this session; it just will not survive reload.
-      console.warn('Failed to save library to localStorage:', error)
+      console.warn('Failed to save library:', error)
     }
   }
 }
@@ -118,7 +138,16 @@ function App(): JSX.Element {
   // adapter above. Without this hook the Browse-libraries button opens the site
   // and correctly points it back here, but nothing receives what it returns —
   // the install silently does nothing.
-  useHandleLibrary({ excalidrawAPI, adapter: libraryAdapter })
+  // Local patch: also accept libraries served by this canvas (/lib/), next to the public repository.
+  useHandleLibrary({
+    excalidrawAPI,
+    adapter: libraryAdapter,
+    validateLibraryUrl: (url) => {
+      const u = new URL(url, window.location.href)
+      return u.origin === window.location.origin ||
+        ['libraries.excalidraw.com', 'raw.githubusercontent.com'].includes(u.hostname)
+    },
+  })
   const [isConnected, setIsConnected] = useState<boolean>(false)
   const websocketRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
