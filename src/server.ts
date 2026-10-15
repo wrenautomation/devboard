@@ -4,6 +4,7 @@ import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import net from 'net';
 import path from 'path';
+import * as projectFs from 'fs';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import logger from './utils/logger.js';
@@ -1441,6 +1442,33 @@ app.get('/', (req: Request, res: Response) => {
 });
 
 // Health check endpoint
+// Local patch: projects. run-canvas.sh sets EXCALIDRAW_PROJECTS_DIR (one folder per project) and
+// EXCALIDRAW_CURRENT_FILE (the open one). Opening another writes the file and exits; launchd restarts
+// the server on that project and the page reloads.
+const PROJECTS_DIR = process.env.EXCALIDRAW_PROJECTS_DIR;
+const CURRENT_FILE = process.env.EXCALIDRAW_CURRENT_FILE;
+const PROJECT_NAME = /^[a-z0-9][a-z0-9-]{0,40}$/;
+const currentProject = (): string => {
+  try { return projectFs.readFileSync(CURRENT_FILE!, 'utf8').trim() || 'main'; } catch { return 'main'; }
+};
+app.get('/api/projects', (_req: Request, res: Response) => {
+  if (!PROJECTS_DIR || !CURRENT_FILE) return res.status(404).json({ success: false, error: 'projects off' });
+  const projects = projectFs.readdirSync(PROJECTS_DIR, { withFileTypes: true })
+    .filter(d => d.isDirectory() && PROJECT_NAME.test(d.name)).map(d => d.name).sort();
+  res.json({ success: true, current: currentProject(), projects });
+});
+app.post('/api/projects/open', (req: Request, res: Response) => {
+  if (!PROJECTS_DIR || !CURRENT_FILE) return res.status(404).json({ success: false, error: 'projects off' });
+  const name = String(req.body?.name ?? '');
+  if (!PROJECT_NAME.test(name)) return res.status(400).json({ success: false, error: 'name: lowercase letters, digits, dashes' });
+  if (name === currentProject()) return res.json({ success: true, current: name, restarting: false });
+  projectFs.mkdirSync(path.join(PROJECTS_DIR, name), { recursive: true });
+  projectFs.writeFileSync(CURRENT_FILE, name + '\n');
+  logger.info(`Opening project "${name}"; restarting`);
+  res.on('finish', () => setTimeout(() => process.kill(process.pid, 'SIGTERM'), 100));
+  res.json({ success: true, current: name, restarting: true });
+});
+
 app.get('/health', (req: Request, res: Response) => {
   res.json({
     status: 'healthy',

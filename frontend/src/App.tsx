@@ -72,6 +72,56 @@ const libraryAdapter: LibraryPersistenceAdapter = {
   }
 }
 
+
+// Local patch: project picker. Each project is its own saved scene on the Mac; switching restarts
+// the canvas server on the other one, then this page reloads into it.
+function ProjectPicker({ beforeSwitch }: { beforeSwitch: () => Promise<void> }) {
+  const [state, setState] = useState<{ current: string; projects: string[] } | null>(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    fetch('/api/projects').then(r => (r.ok ? r.json() : null)).then(d => d && setState(d)).catch(() => {})
+  }, [])
+  if (!state) return <h1>Excalidraw Canvas</h1>
+  const open = async (value: string) => {
+    let name = value
+    if (value === '__new__') {
+      const typed = window.prompt('New project name (lowercase, dashes):', '')
+      if (!typed) return
+      name = typed.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '')
+      if (!name) return
+    }
+    if (name === state.current) return
+    setBusy(true)
+    try {
+      await beforeSwitch()
+      const r = await fetch('/api/projects/open', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }),
+      })
+      const d = await r.json()
+      if (!d.success) throw new Error(d.error)
+      for (let i = 0; i < 40; i++) {
+        await new Promise(res => setTimeout(res, 500))
+        const p = await fetch('/api/projects').then(x => (x.ok ? x.json() : null)).catch(() => null)
+        if (p?.current === name) break
+      }
+      window.location.reload()
+    } catch (error) {
+      setBusy(false)
+      window.alert(`Could not open project: ${error instanceof Error ? error.message : error}`)
+    }
+  }
+  return (
+    <label className="project-picker">
+      <span>Project</span>
+      <select value={state.current} disabled={busy} onChange={e => void open(e.target.value)}>
+        {state.projects.map(p => <option key={p} value={p}>{p}</option>)}
+        <option value="__new__">+ New project…</option>
+      </select>
+      {busy && <span className="spinner"></span>}
+    </label>
+  )
+}
+
 // Type definitions
 type ExcalidrawAPIRefValue = ExcalidrawImperativeAPI;
 
@@ -904,7 +954,7 @@ function App(): JSX.Element {
     <div className="app" data-theme={theme}>
       {/* Header */}
       <div className="header">
-        <h1>Excalidraw Canvas</h1>
+        <ProjectPicker beforeSwitch={() => syncToBackend({ silent: true })} />
         <div className="controls">
           <div className="status">
             <div className={`status-dot ${isConnected ? 'status-connected' : 'status-disconnected'}`}></div>
