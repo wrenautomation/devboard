@@ -892,6 +892,13 @@ app.post('/api/elements/sync', (req: Request, res: Response) => {
     const body = req.body && typeof req.body === 'object' ? req.body : {};
     const { elements: frontendElements, timestamp } = body;
 
+    // A save is an overwrite. A tab still showing another project must never write into this one.
+    const forProject = req.header('x-canvas-project');
+    if (PROJECTS_DIR && CURRENT_FILE && forProject && forProject !== currentProject()) {
+      logger.warn(`Refused sync for "${forProject}": open project is "${currentProject()}"`);
+      return res.status(409).json({ success: false, error: 'project_changed', current: currentProject() });
+    }
+
     // Validate input data
     if (!Array.isArray(frontendElements)) {
       return res.status(400).json({
@@ -1503,6 +1510,7 @@ app.post('/api/projects/rename', (req: Request, res: Response) => {
     return res.status(500).json({ success: false, error: (error as Error).message });
   }
   logger.info(`Renamed project "${from}" to "${to}"`);
+  broadcast({ type: 'project_renamed', from, to } as any);
   broadcast({ type: 'projects_changed' } as any);
   res.json({ success: true, current: currentProject() });
 });

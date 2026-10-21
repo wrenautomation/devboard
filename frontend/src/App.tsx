@@ -244,6 +244,14 @@ function App(): JSX.Element {
   const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const loadedOnceRef = useRef<boolean>(false)
   const [iconsOpen, setIconsOpen] = useState(false)
+  // Local patch: the style box (stroke, fill, width...) can be folded away; the choice is remembered.
+  const [styleHidden, setStyleHidden] = useState(() => {
+    try { return window.localStorage?.getItem('canvas-style-hidden') === '1' } catch { return false }
+  })
+  const toggleStyle = () => setStyleHidden(h => {
+    try { window.localStorage?.setItem('canvas-style-hidden', h ? '0' : '1') } catch { /* private mode */ }
+    return !h
+  })
   useEffect(() => {
     fetch('/api/projects').then(r => (r.ok ? r.json() : null)).then(d => {
       if (d && !projectRef.current) projectRef.current = d.current
@@ -678,10 +686,19 @@ function App(): JSX.Element {
           if (excalidrawAPIRef.current) {
             syncedVersionRef.current = sceneVersion(excalidrawAPIRef.current.getSceneElementsIncludingDeleted())
           }
+          if (autoSyncTimerRef.current) { clearTimeout(autoSyncTimerRef.current); autoSyncTimerRef.current = null }
           projectRef.current = (data as any).project
           draftLoadRef.current = null
           window.dispatchEvent(new CustomEvent('canvas-project', { detail: (data as any).project }))
           break
+
+        case 'project_renamed': {
+          const { from, to } = data as any
+          if (projectRef.current === from) projectRef.current = to
+          void readDraft(from).then(d => d && writeDraft(to, d).then(() => dropDraft(from)))
+          window.dispatchEvent(new CustomEvent('canvas-project', { detail: projectRef.current }))
+          break
+        }
 
         case 'projects_changed':
           window.dispatchEvent(new CustomEvent('canvas-projects-changed'))
@@ -1028,6 +1045,7 @@ function App(): JSX.Element {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(projectRef.current ? { 'x-canvas-project': projectRef.current } : {}),
         },
         body: JSON.stringify({
           elements: backendElements,
@@ -1049,6 +1067,12 @@ function App(): JSX.Element {
           // Reset status after 2 seconds
           setTimeout(() => setSyncStatus('idle'), 2000)
         }
+      } else if (response.status === 409) {
+        // The Mac has another project open. Keep these edits as this project's draft; the switch
+        // events bring the right scene. Never retry into the wrong project.
+        console.warn('Sync refused: another project is open; edits kept as a draft')
+        saveDraftNow()
+        if (autoSyncTimerRef.current) { clearTimeout(autoSyncTimerRef.current); autoSyncTimerRef.current = null }
       } else {
         const error: ApiResponse = await response.json()
         console.error('Sync failed:', error.error)
@@ -1139,7 +1163,10 @@ function App(): JSX.Element {
       )}
 
       {/* Canvas Container */}
-      <div className="canvas-container">
+      <div className="canvas-container" data-style-hidden={styleHidden ? "1" : "0"}>
+        <button className="style-toggle" onClick={toggleStyle} aria-pressed={!styleHidden}>
+          {styleHidden ? "Style ›" : "‹ Style"}
+        </button>
         <div
           onPointerDownCapture={() => {
             userInteractedRef.current = true
