@@ -14,6 +14,24 @@
             border-radius: 8px; border: 1px solid #e2e4e8; background: #ececf4; color: #1e1e1e; cursor: pointer; }
         [data-theme="dark"] .style-toggle { background: #2e2e35; color: #e3e3e8; border-color: #3d3d44; }
         .canvas-container[data-style-hidden="1"] .selected-shape-actions { display: none; }
+        .stroke-width { position: absolute; top: 12px; left: 166px; z-index: 26; }
+        .canvas-container[data-style-hidden="1"] .stroke-width { display: none; }
+        .sw-toggle { font-size: 15px; font-weight: 600; padding: 9px 13px; border-radius: 8px; border: 1px solid #e2e4e8; background: #ececf4; color: #1e1e1e; cursor: pointer; }
+        .sw-pop { position: absolute; top: 46px; left: 0; width: 270px; padding: 12px; border-radius: 12px; background: #fff; border: 1px solid #e2e4e8; box-shadow: 0 6px 24px rgba(0,0,0,.14); }
+        .sw-presets { display: grid; grid-template-columns: repeat(4,1fr); gap: 6px; }
+        .sw-presets button { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 10px 4px; border-radius: 8px; border: 1px solid #e2e4e8; background: #f4f4f8; color: #1e1e1e; cursor: pointer; }
+        .sw-presets button.on { background: #dcdcfa; border-color: #8b8bf0; }
+        .sw-line { width: 28px; background: #1e1e1e; border-radius: 4px; display: block; }
+        .sw-name { font-size: 12px; }
+        .sw-custom { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
+        .sw-custom input[type=range] { flex: 1; }
+        .sw-custom input[type=number] { width: 64px; font-size: 16px; padding: 6px; border-radius: 6px; border: 1px solid #e2e4e8; }
+        [data-theme="dark"] .sw-toggle { background: #2e2e35; color: #e3e3e8; border-color: #3d3d44; }
+        [data-theme="dark"] .sw-pop { background: #232329; border-color: #3d3d44; }
+        [data-theme="dark"] .sw-presets button { background: #2e2e35; color: #e3e3e8; border-color: #3d3d44; }
+        [data-theme="dark"] .sw-presets button.on { background: #3b3b6a; border-color: #8b8bf0; }
+        [data-theme="dark"] .sw-line { background: #e3e3e8; }
+        [data-theme="dark"] .sw-custom input[type=number] { background: #2e2e35; color: #e3e3e8; border-color: #3d3d44; }
         .icons-toggle { font-size: 16px; font-weight: 600; padding: 8px 14px; }
         .icons-toggle.on { background: #6965db; color: #fff; border-color: #6965db; }
         .canvas-container { position: relative; }

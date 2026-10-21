@@ -18,6 +18,7 @@ import { convertMermaidToExcalidraw, DEFAULT_MERMAID_CONFIG } from './utils/merm
 import { cleanElementForExcalidraw, prepareServerScene, assertScenePreserved } from './utils/scene'
 import { preloadCanvasFonts } from './utils/fonts'
 import { IconPanel } from './IconPanel'
+import { StrokeWidth } from './StrokeWidth'
 import type { ServerElement } from './utils/scene'
 import type { MermaidConfig } from '@excalidraw/mermaid-to-excalidraw'
 
@@ -94,6 +95,23 @@ const idb = async <T,>(mode: IDBTransactionMode, run: (store: IDBObjectStore) =>
 const readDraft = (project: string) => idb<Draft | undefined>('readonly', st => st.get(draftKey(project))).catch(() => undefined)
 const writeDraft = (project: string, draft: Draft) => idb('readwrite', st => st.put(draft, draftKey(project))).catch(() => undefined)
 const dropDraft = (project: string) => idb('readwrite', st => st.delete(draftKey(project))).catch(() => undefined)
+// Ramer-Douglas-Peucker: fewer points per stroke = lighter redraws and saves. Returns kept indexes.
+const simplifyIndexes = (pts: readonly (readonly number[])[], eps: number): number[] => {
+  const keep = new Uint8Array(pts.length); keep[0] = 1; keep[pts.length - 1] = 1
+  const stack: [number, number][] = [[0, pts.length - 1]]
+  while (stack.length) {
+    const [a, b] = stack.pop()!
+    const [ax, ay] = pts[a]!, [bx, by] = pts[b]!
+    const len = Math.hypot(bx - ax, by - ay) || 1
+    let far = -1, dmax = eps
+    for (let i = a + 1; i < b; i++) {
+      const d = Math.abs((by - ay) * pts[i]![0]! - (bx - ax) * pts[i]![1]! + bx * ay - by * ax) / len
+      if (d > dmax) { dmax = d; far = i }
+    }
+    if (far >= 0) { keep[far] = 1; stack.push([a, far], [far, b]) }
+  }
+  return [...keep.keys()].filter(i => keep[i])
+}
 // Changes whenever any element is added, edited or deleted (Excalidraw bumps `version` on each edit).
 const sceneVersion = (els: readonly { version: number }[]): number =>
   els.reduce((sum, el) => sum + el.version, 0) * 1000 + els.length
@@ -1167,12 +1185,37 @@ function App(): JSX.Element {
         <button className="style-toggle" onClick={toggleStyle} aria-pressed={!styleHidden}>
           {styleHidden ? "Style ›" : "‹ Style"}
         </button>
+        <StrokeWidth api={excalidrawAPI as ExcalidrawImperativeAPI | null} />
         <div
           onPointerDownCapture={() => {
             userInteractedRef.current = true
           }}
           onKeyDownCapture={() => {
             userInteractedRef.current = true
+          }}
+          onPointerUpCapture={() => {
+            // After Excalidraw ends the stroke: thin out its points once (flag: customData.slim).
+            setTimeout(() => {
+              const api = excalidrawAPIRef.current
+              if (!api) return
+              const els = api.getSceneElementsIncludingDeleted()
+              let changed = false
+              const next = els.map((el: any) => {
+                if (el.type !== 'freedraw' || el.isDeleted || el.customData?.slim || el.points.length < 12 || !el.lastCommittedPoint) return el
+                const idx = simplifyIndexes(el.points, 0.4)
+                const points = idx.map(i => el.points[i])
+                const xs = points.map((q: number[]) => q[0]!), ys = points.map((q: number[]) => q[1]!)
+                changed = true
+                return {
+                  ...el, points,
+                  pressures: el.simulatePressure ? el.pressures : idx.map(i => el.pressures[i]),
+                  width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys),
+                  customData: { ...el.customData, slim: 1 },
+                  version: el.version + 1, versionNonce: Math.floor(Math.random() * 2 ** 31), updated: Date.now(),
+                }
+              })
+              if (changed) api.updateScene({ elements: next as any, captureUpdate: CaptureUpdateAction.NEVER })
+            }, 120)
           }}
           style={{ width: '100%', height: '100%' }}
         >
@@ -1196,7 +1239,12 @@ function App(): JSX.Element {
             initialData={{
               elements: [],
               appState: {
-                theme
+                theme,
+                // Whiteboard-marker defaults: bold black line, big hand-lettered text.
+                currentItemStrokeColor: '#1e1e1e',
+                currentItemStrokeWidth: 2,
+                currentItemFontSize: 28,
+                currentItemFontFamily: 5,
               }
             }}
           />
