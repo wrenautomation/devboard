@@ -1,5 +1,6 @@
 // Local patch: Icons panel. Searchable, by category, over the canvas's pack (/lib/wren.excalidrawlib).
-// Tap an item to drop it at the middle of the view. Excalidraw 0.18's own library has no search.
+// Tap an item to drop it at the middle of the view, or drag it sideways onto the canvas (no long press).
+// Excalidraw 0.18's own library has no search.
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { exportToSvg, restoreElements, CaptureUpdateAction } from '@excalidraw/excalidraw'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
@@ -40,8 +41,12 @@ const SYNONYMS: Record<string, string[]> = {
   website: ['web app', 'webflow', 'wordpress', 'framer'], decision: ['condition', 'yes no'],
 }
 
-function Tile({ item, onPick }: { item: PackItem; onPick: (i: PackItem) => void }) {
+type Drop = { x: number; y: number }
+
+// Sideways drag past 8px starts a drag; a vertical move stays a list scroll (touch-action: pan-y).
+function Tile({ item, onPick }: { item: PackItem; onPick: (i: PackItem, at?: Drop) => void }) {
   const ref = useRef<HTMLButtonElement>(null)
+  const dragged = useRef(false)
   const [svg, setSvg] = useState('')
   useEffect(() => {
     const el = ref.current
@@ -52,8 +57,42 @@ function Tile({ item, onPick }: { item: PackItem; onPick: (i: PackItem) => void 
     io.observe(el)
     return () => io.disconnect()
   }, [item])
+
+  const down = (e: React.PointerEvent) => {
+    if (e.button !== 0) return
+    const x0 = e.clientX, y0 = e.clientY
+    let ghost: HTMLDivElement | null = null
+    dragged.current = false
+    const move = (m: PointerEvent) => {
+      if (!ghost) {
+        const dx = Math.abs(m.clientX - x0), dy = Math.abs(m.clientY - y0)
+        if (dx < 8 || dx < dy) return
+        ghost = document.createElement('div')
+        ghost.className = 'icon-ghost'
+        ghost.innerHTML = svg
+        document.body.appendChild(ghost)
+        dragged.current = true
+      }
+      ghost.style.left = `${m.clientX}px`
+      ghost.style.top = `${m.clientY}px`
+    }
+    const end = (u: PointerEvent) => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', end)
+      window.removeEventListener('pointercancel', end)
+      if (!ghost) return
+      ghost.remove()
+      const over = document.elementFromPoint(u.clientX, u.clientY)
+      if (u.type === 'pointerup' && !over?.closest('.icon-panel')) onPick(item, { x: u.clientX, y: u.clientY })
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', end)
+    window.addEventListener('pointercancel', end)
+  }
+
   return (
-    <button ref={ref} className="icon-tile" title={item.name} onClick={() => onPick(item)}>
+    <button ref={ref} className="icon-tile" title={item.name} onPointerDown={down}
+      onClick={() => { if (!dragged.current) onPick(item); dragged.current = false }}>
       <span className="icon-art" dangerouslySetInnerHTML={{ __html: svg }} />
       <span className="icon-name">{item.name}</span>
     </button>
@@ -131,11 +170,13 @@ export function IconPanel({ api, onClose }: { api: ExcalidrawImperativeAPI | nul
     return [...by]
   }, [shown, query])
 
-  const pick = (item: PackItem) => {
+  // at = the drop point on screen; none = the middle of the view.
+  const pick = (item: PackItem, at?: Drop) => {
     if (!api) return
     const s = api.getAppState()
     const zoom = s.zoom.value
-    const cx = -s.scrollX + s.width / 2 / zoom, cy = -s.scrollY + s.height / 2 / zoom
+    const sx = at ? at.x - s.offsetLeft : s.width / 2, sy = at ? at.y - s.offsetTop : s.height / 2
+    const cx = sx / zoom - s.scrollX, cy = sy / zoom - s.scrollY
     const added = restoreElements(cloneAt(item.elements, cx, cy), null)
     api.updateScene({
       elements: [...api.getSceneElementsIncludingDeleted(), ...added],
