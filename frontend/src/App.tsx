@@ -18,6 +18,7 @@ import { convertMermaidToExcalidraw, DEFAULT_MERMAID_CONFIG } from './utils/merm
 import { cleanElementForExcalidraw, prepareServerScene, assertScenePreserved } from './utils/scene'
 import { preloadCanvasFonts } from './utils/fonts'
 import { IconPanel } from './IconPanel'
+import { Notify } from './Notify'
 import { StrokeWidth } from './StrokeWidth'
 import type { ServerElement } from './utils/scene'
 import type { MermaidConfig } from '@excalidraw/mermaid-to-excalidraw'
@@ -1153,6 +1154,7 @@ function App(): JSX.Element {
       <div className="header">
         <ProjectPicker beforeSwitch={() => syncToBackend({ silent: true })} />
         <button className={`btn-secondary icons-toggle ${iconsOpen ? 'on' : ''}`} onClick={() => setIconsOpen(o => !o)}>Icons</button>
+        <Notify api={excalidrawAPI as ExcalidrawImperativeAPI | null} flush={() => syncToBackend({ silent: true })} />
         <div className="controls">
           <div className="status">
             <div className={`status-dot ${isConnected ? 'status-connected' : 'status-disconnected'}`}></div>

@@ -1451,6 +1451,51 @@ app.get('/', (req: Request, res: Response) => {
 });
 
 // Health check endpoint
+// Local patch: notes to Claude Code sessions. The canvas posts a note (text + the selected ids);
+// `draw watch` holds GET /api/events open (Server-Sent Events) and prints one line per note.
+// The last 200 notes stay in notes.jsonl, so a watcher that reconnects gets the ones it missed.
+type Note = { id: number; at: string; project: string; to: string; text: string; ids: string[]; box?: { x: number; y: number; w: number; h: number } };
+const NOTES_FILE = process.env.EXCALIDRAW_NOTES_FILE
+  ?? (process.env.EXCALIDRAW_CURRENT_FILE ? path.join(path.dirname(process.env.EXCALIDRAW_CURRENT_FILE), 'notes.jsonl') : undefined);
+const notes: Note[] = (() => {
+  try { return projectFs.readFileSync(NOTES_FILE!, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)).slice(-200); } catch { return []; }
+})();
+const watchers = new Map<Response, string>();
+const sendNote = (res: Response, n: Note) => res.write(`id: ${n.id}\ndata: ${JSON.stringify(n)}\n\n`);
+const forWatcher = (n: Note, name: string) => !n.to || n.to === name;
+app.post('/api/notify', (req: Request, res: Response) => {
+  const text = String(req.body?.text ?? '').trim().slice(0, 4000);
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String).slice(0, 500) : [];
+  if (!text && !ids.length) return res.status(400).json({ success: false, error: 'note needs text or selected shapes' });
+  const b = req.body?.box;
+  const box = b && [b.x, b.y, b.w, b.h].every(Number.isFinite) ? { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.w), h: Math.round(b.h) } : undefined;
+  const to = PROJECT_NAME.test(String(req.body?.to ?? '')) ? String(req.body.to) : '';
+  const note: Note = { id: Math.max(Date.now(), (notes.at(-1)?.id ?? 0) + 1), at: new Date().toISOString(), project: currentProject(), to, text, ids, ...(box ? { box } : {}) };
+  notes.push(note);
+  if (notes.length > 200) notes.splice(0, notes.length - 200);
+  if (NOTES_FILE) {
+    try { projectFs.writeFileSync(NOTES_FILE, notes.map(n => JSON.stringify(n)).join('\n') + '\n'); } catch (e) { logger.warn('Could not write notes file', e); }
+  }
+  let reached = 0;
+  watchers.forEach((name, w) => { if (forWatcher(note, name)) { sendNote(w, note); reached++; } });
+  logger.info(`Note ${note.id} to ${to || 'all'}: ${reached} watcher(s)`);
+  res.json({ success: true, id: note.id, reached });
+});
+app.get('/api/events', (req: Request, res: Response) => {
+  const name = PROJECT_NAME.test(String(req.query.name ?? '')) ? String(req.query.name) : 'session';
+  const since = Number(req.header('last-event-id') ?? req.query.since ?? NaN);
+  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+  res.write(': hello\n\n');
+  if (Number.isFinite(since)) notes.filter(n => n.id > since && forWatcher(n, name)).forEach(n => sendNote(res, n));
+  watchers.set(res, name);
+  const beat = setInterval(() => res.write(': beat\n\n'), 25000);
+  req.on('close', () => { clearInterval(beat); watchers.delete(res); });
+});
+// Names of the open watchers, for the canvas "To" picker.
+app.get('/api/watchers', (_req: Request, res: Response) => {
+  res.json({ success: true, watchers: [...new Set(watchers.values())].sort() });
+});
+
 // Local patch: projects. run-canvas.sh sets EXCALIDRAW_PROJECTS_DIR (one folder per project) and
 // EXCALIDRAW_CURRENT_FILE (the open one).
 // Opening another swaps the data directory in this process and sends open tabs the new scene.
