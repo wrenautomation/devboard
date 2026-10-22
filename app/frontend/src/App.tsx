@@ -19,6 +19,7 @@ import { convertMermaidToExcalidraw, DEFAULT_MERMAID_CONFIG } from './utils/merm
 import { cleanElementForExcalidraw, prepareServerScene, assertScenePreserved } from './utils/scene'
 import { preloadCanvasFonts } from './utils/fonts'
 import { IconPanel } from './IconPanel'
+import { SelectionDelete } from './SelectionDelete'
 import { Notify } from './Notify'
 import { Scratch, withoutScratch } from './Scratch'
 import { Projects } from './Projects'
@@ -1185,6 +1186,7 @@ function App(): JSX.Element {
               }
             }}
           />
+          <SelectionDelete api={excalidrawAPI as ExcalidrawImperativeAPI | null} flush={() => syncToBackend({ silent: true })} />
           {iconsOpen && <IconPanel api={excalidrawAPI as ExcalidrawImperativeAPI | null} onClose={() => setIconsOpen(false)} />}
         </div>
       </div>

@@ -95,7 +95,7 @@ export function Projects({ beforeSwitch, saveThumb }: { beforeSwitch: () => Prom
     }
   }, [state, dir, query])
 
-  if (!state) return <div className="pj-crumb"><span className="wm" aria-hidden /> <b>Devboard</b></div>
+  if (!state) return <div className="pj-crumb"><b>Devboard</b></div>
   const isBoard = (p: string) => state.boards.some(b => b.path === p)
   const inFolder = (f: string) => state.boards.filter(b => b.path.startsWith(f + '/')).length
   const crumbs = state.current.split('/')
@@ -130,7 +130,6 @@ export function Projects({ beforeSwitch, saveThumb }: { beforeSwitch: () => Prom
   return (
     <>
       <button className="pj-crumb" onClick={show} aria-haspopup="dialog" title="All projects">
-        <span className="wm" aria-hidden />
         {crumbs.slice(0, -1).map(c => <span key={c} className="pj-crumb-dir">{c}<ChevronRight size={14} /></span>)}
         <b>{crumbs.at(-1)}</b>
         <ChevronDown size={16} className="pj-crumb-caret" />

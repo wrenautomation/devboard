@@ -10,7 +10,6 @@
   --body: "Figtree Variable", "Figtree", system-ui, -apple-system, sans-serif;
   --spring: cubic-bezier(.2, .9, .25, 1.12); --ease: cubic-bezier(.16, 1, .3, 1);
   --leaf: 6px 24px 6px 24px; --leaf-c: 6px 10px 6px 10px; --leaf-p: 3px 10px 3px 10px;
-  --mark: url('./wren-mark.png');
 }
 /* Mixes sit on .app too, so they follow the dark --ink and --accent set there. */
 :root, .app {
@@ -76,8 +75,6 @@ button:disabled, .nt-send:disabled { cursor: default; opacity: .45; transform: n
 .canvas-container { flex: 1; min-height: 0; width: 100%; position: relative; }
 .scene-load-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 20px; background: color-mix(in srgb, var(--warn) 15%, var(--paper)); color: color-mix(in srgb, var(--warn) 70%, var(--ink)); box-shadow: 0 1px 0 var(--hair); }
 
-/* Wren mark */
-.wm { width: 26px; height: 24px; flex: none; background: var(--accent); -webkit-mask: var(--mark) center/contain no-repeat; mask: var(--mark) center/contain no-repeat; }
 
 /* Projects: the breadcrumb in the header opens the Files-style sheet. */
 .pj-crumb { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 6px 12px 6px 8px; border: 0; border-radius: var(--leaf-c); background: none; color: var(--ink); font-size: 16px; }
@@ -211,3 +208,8 @@ button:disabled, .nt-send:disabled { cursor: default; opacity: .45; transform: n
 
 /* Excalidraw's own Library is muted: the Icons panel replaces it. */
 .default-sidebar-trigger { display: none !important; }
+
+/* Delete X beside the selection (SelectionDelete.tsx). */
+.sel-delete { position: fixed; z-index: 15; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border: none; border-radius: var(--leaf-c);
+  background: var(--paper); color: var(--bad); box-shadow: inset 0 0 0 1px var(--hair), 0 2px 0 var(--hair), var(--lift); touch-action: manipulation; }
+.sel-delete:active { transform: translateY(2px); background: var(--bad); color: #fff; }

@@ -26,6 +26,12 @@ export function Notify({ api, flush }: { api: ExcalidrawImperativeAPI | null; fl
     return api.onChange(read)
   }, [api])
 
+  // Who is watching now, each time the panel opens.
+  useEffect(() => {
+    if (!open) return
+    fetch('/api/watchers').then(r => r.json()).then(d => setWatchers(d.watchers ?? [])).catch(() => setWatchers([]))
+  }, [open])
+
   const send = async () => {
     if (!api) return
     mic.stop()
