@@ -213,14 +213,6 @@ function App(): JSX.Element {
   const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const loadedOnceRef = useRef<boolean>(false)
   const [iconsOpen, setIconsOpen] = useState(false)
-  // Local patch: the style box (stroke, fill, width...) can be folded away; the choice is remembered.
-  const [styleHidden, setStyleHidden] = useState(() => {
-    try { return window.localStorage?.getItem('canvas-style-hidden') === '1' } catch { return false }
-  })
-  const toggleStyle = () => setStyleHidden(h => {
-    try { window.localStorage?.setItem('canvas-style-hidden', h ? '0' : '1') } catch { /* private mode */ }
-    return !h
-  })
   useEffect(() => {
     fetch('/api/projects').then(r => (r.ok ? r.json() : null)).then(d => {
       if (d && !projectRef.current) projectRef.current = d.current
@@ -1143,10 +1135,7 @@ function App(): JSX.Element {
       )}
 
       {/* Canvas Container */}
-      <div className="canvas-container" data-style-hidden={styleHidden ? "1" : "0"}>
-        <button className="style-toggle" onClick={toggleStyle} aria-pressed={!styleHidden}>
-          {styleHidden ? "Style ›" : "‹ Style"}
-        </button>
+      <div className="canvas-container">
         <StrokeWidth api={excalidrawAPI as ExcalidrawImperativeAPI | null} />
         <div
           onPointerDownCapture={() => {
