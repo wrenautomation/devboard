@@ -5,7 +5,6 @@ notes.jsonl
 watch/
 trash/
 backups/
-projects/*/canvas-state.lock
-projects/**/.tmp-*
 *.log
 .DS_Store
+projects/

@@ -3,7 +3,7 @@
 // Node, not bash: macOS lets launchd's node read ~/Documents, but not /bin/bash (same as autobrowse's agents).
 //   canvas  serves the project named in ./current (default main) on $HOST:$PORT.
 //   tunnel  cloudflared for draw.wrenautomation.com, token from ./tunnel.token.
-//   backup  commits changed boards in ./projects and pushes. Touches projects/ only, never code.
+//   backup  commits changed boards in ./projects (its own private repo, devboard-boards) and pushes.
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync, spawn } from 'node:child_process'
@@ -29,15 +29,15 @@ if (mode === 'canvas') {
   for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => child.kill(sig))
   child.on('exit', code => process.exit(code ?? 1))
 } else if (mode === 'backup') {
-  const git = (...a) => execFileSync('git', a, { cwd: DIR, encoding: 'utf8' })
+  const git = (...a) => execFileSync('git', a, { cwd: path.join(DIR, 'projects'), encoding: 'utf8' })
   for (const p of fs.readdirSync(path.join(DIR, 'projects'))) {
     const f = path.join(DIR, 'projects', p, 'canvas-state-v1.json')
     if (fs.existsSync(f)) JSON.parse(fs.readFileSync(f, 'utf8')) // a broken board stops the backup
   }
-  git('add', '-A', 'projects')
+  git('add', '-A')
   try { git('diff', '--cached', '--quiet'); console.log(`${new Date().toISOString()} no board changes`); process.exit(0) } catch {}
   const day = new Date().toISOString().slice(0, 10)
-  git('-c', 'user.name=William Jin', '-c', 'user.email=jinwilliam.jin@gmail.com', 'commit', '-q', '-m', `boards: ${day}`, '--', 'projects')
+  git('-c', 'user.name=William Jin', '-c', 'user.email=jinwilliam.jin@gmail.com', 'commit', '-q', '-m', `boards: ${day}`)
   git('push', '-q', 'origin', 'HEAD')
   console.log(`${new Date().toISOString()} pushed boards ${day}`)
 } else {

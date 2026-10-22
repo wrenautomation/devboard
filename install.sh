@@ -8,11 +8,11 @@
 #         ./library/wren.excalidrawlib (brand logos + catalog sets, built by library/brands.js + merge.py) is
 #         served at /lib/; import it once per browser with /#addLibrary=<that url>.
 # tunnel  draw.wrenautomation.com → canvas, Cloudflare tunnel "wren-canvas", token in tunnel.token.
-#         Cloudflare Access app "Excalidraw canvas" (team little-hill-c547) lets in jinwilliam.jin@gmail.com
-#         by emailed code; the tunnel route requires its Access JWT (originRequest.access), so nothing else gets through.
-# backup  nightly 03:30: agent.mjs backup commits ./projects and pushes (private repo wrenautomation/devboard).
+#         A Cloudflare Access app lets in the owner by emailed code; the tunnel route requires its Access JWT (originRequest.access), so nothing else gets through.
+# backup  nightly 03:30: agent.mjs backup commits ./projects and pushes it (own private repo, devboard-boards).
+# License: our code PolyForm Strict 1.0.0 (LICENSE.md); app/ is the MIT fork (app/LICENSE keeps upstream's notice).
 # Repo layout: app/ = the mcp_excalidraw fork (history kept; upstream remote = yctimlin), bin/draw (linked to
-#         ~/.local/bin/draw and devboard), skill/excalidraw-skill (linked to ~/.claude/skills), library/, projects/.
+#         ~/.local/bin/draw and devboard), skill/excalidraw-skill (linked to ~/.claude/skills), library/. projects/ is gitignored: boards live in their own private repo.
 # All three run `node agent.mjs <mode>`: launchd's bash may not read ~/Documents, node may.
 # Logs: ~/Library/Logs/excalidraw-canvas*.log, devboard-backup.log
 set -euo pipefail
