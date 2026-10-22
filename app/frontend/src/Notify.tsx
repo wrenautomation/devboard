@@ -1,11 +1,10 @@
 // Local patch: send a note to the Claude Code sessions that run `draw watch`.
 // The note carries the text and either a marked area (a box dragged over the canvas) or the selected shapes.
 // Claude then screenshots only that part, which keeps the image small. Mic = Safari speech to text.
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
 import { BoxDraw, boxStyle, toScreen, type Box } from './BoxDraw'
-
-const Speech: any = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition
+import { appendSaid, canDictate, useDictation } from './speech'
 
 export function Notify({ api, flush }: { api: ExcalidrawImperativeAPI | null; flush: () => Promise<void> }) {
   const [open, setOpen] = useState(false)
@@ -14,11 +13,10 @@ export function Notify({ api, flush }: { api: ExcalidrawImperativeAPI | null; fl
   const [watchers, setWatchers] = useState<string[]>([])
   const [picked, setPicked] = useState(0)
   const [status, setStatus] = useState('')
-  const [listening, setListening] = useState(false)
   const [area, setArea] = useState<Box | null>(null) // scene coords
   const [marking, setMarking] = useState(false)
   const [, setView] = useState(0)
-  const rec = useRef<any>(null)
+  const mic = useDictation(said => setText(t => appendSaid(t, said)), setStatus)
 
   useEffect(() => {
     if (!api) return
@@ -27,27 +25,9 @@ export function Notify({ api, flush }: { api: ExcalidrawImperativeAPI | null; fl
     return api.onChange(read)
   }, [api])
 
-  const mic = () => {
-    if (listening) { rec.current?.stop(); return }
-    const r = new Speech()
-    r.lang = navigator.language || 'en-US'
-    r.continuous = true
-    r.interimResults = false
-    r.onresult = (e: any) => {
-      let said = ''
-      for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) said += e.results[i][0].transcript
-      if (said) setText(t => (t ? t.replace(/\s*$/, ' ') : '') + said.trim())
-    }
-    r.onerror = (e: any) => setStatus(`Mic: ${e.error}`)
-    r.onend = () => setListening(false)
-    rec.current = r
-    r.start()
-    setListening(true)
-  }
-
   const send = async () => {
     if (!api) return
-    rec.current?.stop()
+    mic.stop()
     const sel = area ? {} : api.getAppState().selectedElementIds
     const els = api.getSceneElements().filter(e => sel[e.id])
     const ids = els.map(e => e.id)
@@ -95,9 +75,9 @@ export function Notify({ api, flush }: { api: ExcalidrawImperativeAPI | null; fl
           </div>
           <div className="nt-text">
             <textarea value={text} onChange={e => setText(e.target.value)} placeholder="What should Claude check?" rows={4} />
-            {Speech && (
-              <button className={`nt-mic ${listening ? 'on' : ''}`} onClick={mic} aria-pressed={listening} title="Speak">
-                {listening ? 'Stop' : 'Mic'}
+            {canDictate && (
+              <button className={`nt-mic ${mic.listening ? 'on' : ''}`} onClick={mic.toggle} aria-pressed={mic.listening} title="Speak">
+                {mic.listening ? 'Stop' : 'Mic'}
               </button>
             )}
           </div>

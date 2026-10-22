@@ -8,7 +8,7 @@ import { BoxDraw, type Box } from './BoxDraw'
 
 export const SCRATCH_NAME = 'Scratch (Claude ignores)'
 
-export function Scratch({ api }: { api: ExcalidrawImperativeAPI | null }) {
+export function Scratch({ api, flush }: { api: ExcalidrawImperativeAPI | null; flush: () => Promise<void> }) {
   const [drawing, setDrawing] = useState(false)
 
   const make = (b: Box) => {
@@ -31,6 +31,7 @@ export function Scratch({ api }: { api: ExcalidrawImperativeAPI | null }) {
       appState: { selectedElementIds: {} },
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     })
+    void flush() // a button edit has no canvas touch, so autosave would wait; save now
   }
 
   return (

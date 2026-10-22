@@ -20,6 +20,7 @@ import { preloadCanvasFonts } from './utils/fonts'
 import { IconPanel } from './IconPanel'
 import { Notify } from './Notify'
 import { Scratch } from './Scratch'
+import { Voice } from './Voice'
 import { StrokeWidth } from './StrokeWidth'
 import type { ServerElement } from './utils/scene'
 import type { MermaidConfig } from '@excalidraw/mermaid-to-excalidraw'
@@ -1165,7 +1166,8 @@ function App(): JSX.Element {
         <ProjectPicker beforeSwitch={() => syncToBackend({ silent: true })} />
         <button className={`btn-secondary icons-toggle ${iconsOpen ? 'on' : ''}`} onClick={() => setIconsOpen(o => !o)}>Icons</button>
         <Notify api={excalidrawAPI as ExcalidrawImperativeAPI | null} flush={() => syncToBackend({ silent: true })} />
-        <Scratch api={excalidrawAPI as ExcalidrawImperativeAPI | null} />
+        <Voice api={excalidrawAPI as ExcalidrawImperativeAPI | null} flush={() => syncToBackend({ silent: true })} />
+        <Scratch api={excalidrawAPI as ExcalidrawImperativeAPI | null} flush={() => syncToBackend({ silent: true })} />
         <div className="controls">
           <div className="status">
             <div className={`status-dot ${isConnected ? 'status-connected' : 'status-disconnected'}`}></div>
