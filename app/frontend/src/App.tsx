@@ -105,26 +105,6 @@ const idb = async <T,>(mode: IDBTransactionMode, run: (store: IDBObjectStore) =>
 const readDraft = (project: string) => idb<Draft | undefined>('readonly', st => st.get(draftKey(project))).catch(() => undefined)
 const writeDraft = (project: string, draft: Draft) => idb('readwrite', st => st.put(draft, draftKey(project))).catch(() => undefined)
 const dropDraft = (project: string) => idb('readwrite', st => st.delete(draftKey(project))).catch(() => undefined)
-// Ramer-Douglas-Peucker: fewer points per stroke = lighter redraws and saves. Returns kept indexes.
-const simplifyIndexes = (pts: readonly (readonly number[])[], eps: number): number[] => {
-  const keep = new Uint8Array(pts.length); keep[0] = 1; keep[pts.length - 1] = 1
-  const stack: [number, number][] = [[0, pts.length - 1]]
-  while (stack.length) {
-    const [a, b] = stack.pop()!
-    const [ax, ay] = pts[a]!, [bx, by] = pts[b]!
-    const len = Math.hypot(bx - ax, by - ay)
-    let far = -1, dmax = eps
-    for (let i = a + 1; i < b; i++) {
-      // Ends that meet (a closed O or triangle): no line to measure from, so use distance to the end point.
-      const d = len < 1e-6
-        ? Math.hypot(pts[i]![0]! - ax, pts[i]![1]! - ay)
-        : Math.abs((by - ay) * pts[i]![0]! - (bx - ax) * pts[i]![1]! + bx * ay - by * ax) / len
-      if (d > dmax) { dmax = d; far = i }
-    }
-    if (far >= 0) { keep[far] = 1; stack.push([a, far], [far, b]) }
-  }
-  return [...keep.keys()].filter(i => keep[i])
-}
 // Changes whenever any element is added, edited or deleted (Excalidraw bumps `version` on each edit).
 const sceneVersion = (els: readonly { version: number }[]): number =>
   els.reduce((sum, el) => sum + el.version, 0) * 1000 + els.length
@@ -1173,30 +1153,6 @@ function App(): JSX.Element {
           }}
           onKeyDownCapture={() => {
             userInteractedRef.current = true
-          }}
-          onPointerUpCapture={() => {
-            // After Excalidraw ends the stroke: thin out its points once (flag: customData.slim).
-            setTimeout(() => {
-              const api = excalidrawAPIRef.current
-              if (!api) return
-              const els = api.getSceneElementsIncludingDeleted()
-              let changed = false
-              const next = els.map((el: any) => {
-                if (el.type !== 'freedraw' || el.isDeleted || el.customData?.slim || el.points.length < 12 || !el.lastCommittedPoint) return el
-                const idx = simplifyIndexes(el.points, 0.4)
-                const points = idx.map(i => el.points[i])
-                const xs = points.map((q: number[]) => q[0]!), ys = points.map((q: number[]) => q[1]!)
-                changed = true
-                return {
-                  ...el, points,
-                  pressures: el.simulatePressure ? el.pressures : idx.map(i => el.pressures[i]),
-                  width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys),
-                  customData: { ...el.customData, slim: 1 },
-                  version: el.version + 1, versionNonce: Math.floor(Math.random() * 2 ** 31), updated: Date.now(),
-                }
-              })
-              if (changed) api.updateScene({ elements: next as any, captureUpdate: CaptureUpdateAction.NEVER })
-            }, 120)
           }}
           style={{ width: '100%', height: '100%' }}
         >
