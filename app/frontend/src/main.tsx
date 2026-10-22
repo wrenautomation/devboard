@@ -2,6 +2,8 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.tsx'
 import '@excalidraw/excalidraw/index.css'
+import '@fontsource-variable/figtree'
+import './wren.css'
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {

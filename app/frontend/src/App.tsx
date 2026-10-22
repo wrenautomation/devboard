@@ -19,7 +19,9 @@ import { cleanElementForExcalidraw, prepareServerScene, assertScenePreserved } f
 import { preloadCanvasFonts } from './utils/fonts'
 import { IconPanel } from './IconPanel'
 import { Notify } from './Notify'
-import { Scratch } from './Scratch'
+import { Scratch, withoutScratch } from './Scratch'
+import { Projects } from './Projects'
+import { Eraser, Shapes } from 'lucide-react'
 import { Voice } from './Voice'
 import { StrokeWidth } from './StrokeWidth'
 import type { ServerElement } from './utils/scene'
@@ -122,68 +124,15 @@ const simplifyIndexes = (pts: readonly (readonly number[])[], eps: number): numb
 const sceneVersion = (els: readonly { version: number }[]): number =>
   els.reduce((sum, el) => sum + el.version, 0) * 1000 + els.length
 
-// Local patch: project picker. Each project is its own saved scene on the Mac. Opening one swaps
-// it in on the server, which sends this tab the new scene; no reload.
-const postJson = async (url: string, body: unknown) => {
-  const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
-  const d = await r.json().catch(() => ({}))
-  if (!r.ok || !d.success) throw new Error(d.error || `HTTP ${r.status}`)
-  return d
-}
-const toProjectName = (typed: string) =>
-  typed.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
-
-function ProjectPicker({ beforeSwitch }: { beforeSwitch: () => Promise<void> }) {
-  const [state, setState] = useState<{ current: string; projects: string[] } | null>(null)
-  const [busy, setBusy] = useState(false)
-  const refresh = () =>
-    fetch('/api/projects').then(r => (r.ok ? r.json() : null)).then(d => d && setState(d)).catch(() => {})
-  useEffect(() => {
-    void refresh()
-    const onChange = () => void refresh()
-    window.addEventListener('canvas-project', onChange)
-    window.addEventListener('canvas-projects-changed', onChange)
-    return () => {
-      window.removeEventListener('canvas-project', onChange)
-      window.removeEventListener('canvas-projects-changed', onChange)
-    }
-  }, [])
-  if (!state) return <h1>Excalidraw Canvas</h1>
-  const run = async (work: () => Promise<unknown>) => {
-    setBusy(true)
-    try { await work() } catch (error) {
-      window.alert(error instanceof Error ? error.message : String(error))
-    } finally { setBusy(false); void refresh() }
-  }
-  const choose = (value: string) => {
-    const current = state.current
-    if (value === '__new__') {
-      const name = toProjectName(window.prompt('New project name:', '') || '')
-      if (name) void run(async () => { await beforeSwitch(); await postJson('/api/projects/open', { name }) })
-    } else if (value === '__rename__') {
-      const to = toProjectName(window.prompt(`Rename "${current}" to:`, current) || '')
-      if (to && to !== current) void run(() => postJson('/api/projects/rename', { from: current, to }))
-    } else if (value === '__delete__') {
-      if (window.confirm(`Delete "${current}"? It moves to the trash folder on the Mac.`)) {
-        void run(() => postJson('/api/projects/delete', { name: current }))
-      }
-    } else if (value !== current) {
-      void run(async () => { await beforeSwitch(); await postJson('/api/projects/open', { name: value }) })
-    }
-  }
-  return (
-    <label className="project-picker">
-      <span>Project</span>
-      <select value={state.current} disabled={busy} onChange={e => choose(e.target.value)}>
-        {state.projects.map(p => <option key={p} value={p}>{p}</option>)}
-        <option disabled>──────────</option>
-        <option value="__new__">+ New project…</option>
-        <option value="__rename__">Rename this project…</option>
-        <option value="__delete__">Delete this project…</option>
-      </select>
-      {busy && <span className="spinner"></span>}
-    </label>
-  )
+// Local patch: thumbnail of the open board for the Projects view; scratch areas are left out.
+async function postThumb(api: ExcalidrawImperativeAPI, project: string) {
+  const elements = withoutScratch(api.getSceneElements() as any[]) as any[]
+  if (!elements.length) return
+  const blob = await exportToBlob({
+    elements, files: api.getFiles(), maxWidthOrHeight: 480, mimeType: 'image/png',
+    appState: { ...api.getAppState(), exportBackground: true, exportWithDarkMode: false },
+  })
+  await fetch('/api/projects/thumb', { method: 'POST', headers: { 'content-type': 'image/png', 'x-devboard-tab': '1', 'x-canvas-project': project }, body: blob })
 }
 
 // Type definitions
@@ -266,6 +215,11 @@ function App(): JSX.Element {
   })
   const [isConnected, setIsConnected] = useState<boolean>(false)
   const projectRef = useRef<string | null>(null)
+  const thumbAtRef = useRef(0)
+  const saveThumb = async () => {
+    const api = excalidrawAPIRef.current, project = projectRef.current
+    if (api && project) await postThumb(api, project).catch(() => {})
+  }
   const syncedVersionRef = useRef<number>(0)
   const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const loadedOnceRef = useRef<boolean>(false)
@@ -1089,6 +1043,8 @@ function App(): JSX.Element {
         if (projectRef.current && sceneVersion(api.getSceneElementsIncludingDeleted()) === sentVersion) {
           void dropDraft(projectRef.current)
         }
+        // A fresh thumbnail at most once a minute while the board changes.
+        if (Date.now() - thumbAtRef.current > 60_000) { thumbAtRef.current = Date.now(); void saveThumb() }
         setLastSyncTime(new Date())
         console.log(`Sync successful: ${result.count} elements synced`)
 
@@ -1163,8 +1119,8 @@ function App(): JSX.Element {
     <div className="app" data-theme={theme}>
       {/* Header */}
       <div className="header">
-        <ProjectPicker beforeSwitch={() => syncToBackend({ silent: true })} />
-        <button className={`btn-secondary icons-toggle ${iconsOpen ? 'on' : ''}`} onClick={() => setIconsOpen(o => !o)}>Icons</button>
+        <Projects beforeSwitch={() => syncToBackend({ silent: true })} saveThumb={saveThumb} />
+        <button className={`btn-secondary icons-toggle ${iconsOpen ? 'on' : ''}`} onClick={() => setIconsOpen(o => !o)} aria-label="Icons"><Shapes size={17} /><span className="hb-word">Icons</span></button>
         <Notify api={excalidrawAPI as ExcalidrawImperativeAPI | null} flush={() => syncToBackend({ silent: true })} />
         <Voice api={excalidrawAPI as ExcalidrawImperativeAPI | null} flush={() => syncToBackend({ silent: true })} />
         <Scratch api={excalidrawAPI as ExcalidrawImperativeAPI | null} flush={() => syncToBackend({ silent: true })} />
@@ -1180,7 +1136,7 @@ function App(): JSX.Element {
             </span>
           </div>
 
-          <button className="btn-secondary" onClick={clearCanvas} disabled={!isConnected || sceneLoadStatus !== 'ready'}>Clear Canvas</button>
+          <button className="btn-secondary" onClick={clearCanvas} disabled={!isConnected || sceneLoadStatus !== 'ready'} aria-label="Clear canvas"><Eraser size={17} /><span className="hb-word">Clear</span></button>
         </div>
       </div>
 

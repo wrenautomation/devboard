@@ -4,9 +4,23 @@
 import React, { useState } from 'react'
 import { restoreElements, CaptureUpdateAction } from '@excalidraw/excalidraw'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
+import { EyeOff } from 'lucide-react'
 import { BoxDraw, type Box } from './BoxDraw'
 
 export const SCRATCH_NAME = 'Scratch (Claude ignores)'
+
+// Same rule as scratchHidden in server.ts: scratch frames and what sits inside them. For thumbnails.
+export function withoutScratch<T extends { id: string; type: string; x: number; y: number; width: number; height: number }>(all: readonly T[]): T[] {
+  const frames = all.filter(e => e.type === 'frame' && /^scratch/i.test(String((e as any).name ?? '')))
+  if (!frames.length) return [...all]
+  const ids = new Set(frames.map(f => f.id))
+  const inside = (e: T) => {
+    const cx = e.x + e.width / 2, cy = e.y + e.height / 2
+    return frames.some(f => cx >= f.x && cx <= f.x + f.width && cy >= f.y && cy <= f.y + f.height)
+  }
+  const hidden = new Set(all.filter(e => ids.has(e.id) || ((e as any).frameId && ids.has((e as any).frameId)) || inside(e)).map(e => e.id))
+  return all.filter(e => !hidden.has(e.id) && !hidden.has((e as any).containerId))
+}
 
 export function Scratch({ api, flush }: { api: ExcalidrawImperativeAPI | null; flush: () => Promise<void> }) {
   const [drawing, setDrawing] = useState(false)
@@ -36,7 +50,7 @@ export function Scratch({ api, flush }: { api: ExcalidrawImperativeAPI | null; f
 
   return (
     <>
-      <button className="btn-secondary" onClick={() => setDrawing(true)} title="Drag a box. Claude never sees what is inside it.">Scratch</button>
+      <button className="btn-secondary" onClick={() => setDrawing(true)} title="Drag a box. Claude never sees what is inside it." aria-label="Scratch"><EyeOff size={17} /><span className="hb-word">Scratch</span></button>
       {drawing && api && <BoxDraw api={api} hint="Drag a box for scratch work. Claude never sees inside it" onDone={make} onCancel={() => setDrawing(false)} />}
     </>
   )

@@ -983,9 +983,16 @@ export function switchDurableDirectory(directory: string): DurableStateStatus {
 export function renameDurableDirectory(directory: string): DurableStateStatus {
   const current = durableStateDirectory();
   if (!current) throw new Error('Canvas persistence is off');
+  return moveDurableDirectory(current, directory, directory);
+}
+
+// Local patch: move `from` (the open data directory or a folder above it) to `to`; the open
+// directory ends up at `opened`.
+export function moveDurableDirectory(from: string, to: string, opened: string): DurableStateStatus {
+  if (!durableStateDirectory()) throw new Error('Canvas persistence is off');
   releaseDurableStateLock();
-  renameSync(current, directory);
-  process.env.EXCALIDRAW_DATA_DIR = directory;
+  try { renameSync(from, to); } catch (error) { acquireDurableStateLock(); throw error; }
+  process.env.EXCALIDRAW_DATA_DIR = opened;
   initializedAuthority = undefined;
   acquireDurableStateLock();
   return loadDurableState();

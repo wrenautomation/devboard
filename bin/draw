@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # devboard CLI (also `draw`): the excalidraw-canvas CLI against the launchd canvas (127.0.0.1:3100); never spawns its own.
-# Projects: each is its own saved scene in <devboard>/projects/<name>; `current` names the open one.
+# Projects: each is its own saved scene in <devboard>/projects/<path>; folders nest with / (clients/acme).
+# `current` names the open one.
 #   draw project                 list (* = open)
-#   draw project open <name>     switch the canvas to <name> (made if new, in place); open tabs get its scene
-#   draw project rm <name>       delete a project (not the open one)
+#   draw project open <path>     switch the canvas to <path> (made if new, in place); open tabs get its scene
+#   draw project rm <path>       delete a project (not the open one)
 # Notes: draw watch [--name x] [--all] prints one line per note sent from the canvas (run it in Monitor).
 # Icons: draw icon <name> <x> <y> places a library item (brand logos etc.); draw icon --list names them.
 set -euo pipefail
@@ -18,16 +19,17 @@ fi
 [ "${1:-}" = project ] || cli "$@"
 cur="$(cat "$DIR/current" 2>/dev/null || echo main)"
 case "${2:-}" in
-  "") for p in "$DIR"/projects/*/; do p="$(basename "$p")"; [ "$p" = "$cur" ] && echo "* $p" || echo "  $p"; done ;;
+  "") (cd "$DIR/projects" && find . -name canvas-state-v1.json -not -path './.git/*' | sed 's|^\./||; s|/canvas-state-v1.json$||' | sort) \
+        | while IFS= read -r p; do [ "$p" = "$cur" ] && echo "* $p" || echo "  $p"; done ;;
   open)
-    name="${3:?name}"; [[ "$name" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo "name: lowercase, digits, dashes" >&2; exit 2; }
+    name="${3:?name}"; [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9\ _/-]*$ ]] || { echo "name: letters, digits, spaces, dashes; folders with /" >&2; exit 2; }
     [ "$name" = "$cur" ] && { echo "open: $name"; exit 0; }
     curl -sf -X POST -H 'content-type: application/json' -d "{\"name\":\"$name\"}" "$URL/api/projects/open" >/dev/null \
       && echo "open: $name" || { echo "could not open $name; see ~/Library/Logs/excalidraw-canvas.log" >&2; exit 1; } ;;
   rm)
     name="${3:?name}"; [ "$name" = "$cur" ] && { echo "can't delete the open project" >&2; exit 2; }
     [ -d "$DIR/projects/$name" ] || { echo "no project $name" >&2; exit 2; }
-    mkdir -p "$DIR/backups"; tar -czf "$DIR/backups/$name-$(date +%Y%m%d-%H%M%S).tgz" -C "$DIR/projects" "$name"
+    mkdir -p "$DIR/backups"; tar -czf "$DIR/backups/${name//\//--}-$(date +%Y%m%d-%H%M%S).tgz" -C "$DIR/projects" "$name"
     rm -rf "${DIR:?}/projects/$name"; echo "deleted: $name (tarball in backups/)" ;;
   *) echo "usage: draw project [open <name> | rm <name>]" >&2; exit 2 ;;
 esac

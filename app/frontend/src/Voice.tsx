@@ -3,6 +3,7 @@
 import React, { useState } from 'react'
 import { convertToExcalidrawElements, CaptureUpdateAction, FONT_FAMILY } from '@excalidraw/excalidraw'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
+import { Mic } from 'lucide-react'
 import { appendSaid, canDictate, formatSpeech, useDictation } from './speech'
 
 const EMS = 26 // wrap width in font sizes (about 50 letters); the text rewraps when the box is resized
@@ -63,7 +64,7 @@ export function Voice({ api, flush }: { api: ExcalidrawImperativeAPI | null; flu
 
   return (
     <div className="notify">
-      <button className={`btn-secondary notify-toggle ${open ? 'on' : ''}`} onClick={toggle} aria-expanded={open}>Voice text</button>
+      <button className={`btn-secondary notify-toggle ${open ? 'on' : ''}`} onClick={toggle} aria-expanded={open} aria-label="Voice text"><Mic size={17} /><span className="hb-word">Voice text</span></button>
       {open && (
         <div className="nt-pop">
           <div className="nt-area"><span>Say "new line", "new paragraph" or "bullet" to shape the text.</span></div>

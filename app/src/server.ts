@@ -42,7 +42,7 @@ import {
   loadDurableState,
   releaseDurableStateLock,
   switchDurableDirectory,
-  renameDurableDirectory,
+  moveDurableDirectory,
 } from './core/canvas-persistence.js';
 
 function mutationErrorStatus(error: unknown, fallback: number): number {
@@ -1523,7 +1523,7 @@ app.post('/api/notify', (req: Request, res: Response) => {
   // area: the box is a marked area, not the bounds of the selected shapes.
   const area = req.body?.area === true && box && box.w > 0 && box.h > 0;
   if (!text && !ids.length && !area) return res.status(400).json({ success: false, error: 'note needs text, selected shapes or a marked area' });
-  const to = PROJECT_NAME.test(String(req.body?.to ?? '')) ? String(req.body.to) : '';
+  const to = WATCHER_NAME.test(String(req.body?.to ?? '')) ? String(req.body.to) : '';
   const note: Note = { id: Math.max(Date.now(), (notes.at(-1)?.id ?? 0) + 1), at: new Date().toISOString(), project: currentProject(), to, text, ids, ...(box ? { box } : {}), ...(area ? { area: true as const } : {}) };
   notes.push(note);
   if (notes.length > 200) notes.splice(0, notes.length - 200);
@@ -1536,7 +1536,7 @@ app.post('/api/notify', (req: Request, res: Response) => {
   res.json({ success: true, id: note.id, reached });
 });
 app.get('/api/events', (req: Request, res: Response) => {
-  const name = PROJECT_NAME.test(String(req.query.name ?? '')) ? String(req.query.name) : 'session';
+  const name = WATCHER_NAME.test(String(req.query.name ?? '')) ? String(req.query.name) : 'session';
   const since = Number(req.header('last-event-id') ?? req.query.since ?? NaN);
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
   res.write(': hello\n\n');
@@ -1550,90 +1550,140 @@ app.get('/api/watchers', (_req: Request, res: Response) => {
   res.json({ success: true, watchers: [...new Set(watchers.values())].sort() });
 });
 
-// Local patch: projects. run-canvas.sh sets EXCALIDRAW_PROJECTS_DIR (one folder per project) and
-// EXCALIDRAW_CURRENT_FILE (the open one).
-// Opening another swaps the data directory in this process and sends open tabs the new scene.
+// Local patch: projects (boards) in folders. agent.mjs sets EXCALIDRAW_PROJECTS_DIR and EXCALIDRAW_CURRENT_FILE
+// (the open board's path). A board is a folder that holds canvas-state-v1.json; any other folder is a folder.
+// Paths use "/" (clients/acme/flow), at most 5 deep. Opening a board swaps the data directory in this process
+// and sends open tabs the new scene.
 const PROJECTS_DIR = process.env.EXCALIDRAW_PROJECTS_DIR;
 const CURRENT_FILE = process.env.EXCALIDRAW_CURRENT_FILE;
-const PROJECT_NAME = /^[a-z0-9][a-z0-9-]{0,40}$/;
-const currentProject = (): string => {
-  try { return projectFs.readFileSync(CURRENT_FILE!, 'utf8').trim() || 'main'; } catch { return 'main'; }
+const WATCHER_NAME = /^[a-z0-9][a-z0-9-]{0,40}$/; // `draw watch --name`, the canvas "To" picker
+const BOARD_PATH = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,47}(\/[A-Za-z0-9][A-Za-z0-9 _-]{0,47}){0,4}$/;
+const STATE_FILE = 'canvas-state-v1.json', THUMB_FILE = 'thumb.png';
+const boardPath = (v: unknown): string | null => {
+  const p = String(v ?? '').split('/').map(s => s.trim()).join('/');
+  return BOARD_PATH.test(p) ? p : null;
 };
-app.get('/api/projects', (_req: Request, res: Response) => {
-  if (!PROJECTS_DIR || !CURRENT_FILE) return res.status(404).json({ success: false, error: 'projects off' });
-  const projects = projectFs.readdirSync(PROJECTS_DIR, { withFileTypes: true })
-    .filter(d => d.isDirectory() && PROJECT_NAME.test(d.name)).map(d => d.name).sort();
-  res.json({ success: true, current: currentProject(), projects });
-});
-app.post('/api/projects/open', (req: Request, res: Response) => {
-  if (!PROJECTS_DIR || !CURRENT_FILE) return res.status(404).json({ success: false, error: 'projects off' });
-  const name = String(req.body?.name ?? '');
-  if (!PROJECT_NAME.test(name)) return res.status(400).json({ success: false, error: 'name: lowercase letters, digits, dashes' });
-  if (name === currentProject()) return res.json({ success: true, current: name });
-  projectFs.mkdirSync(path.join(PROJECTS_DIR, name), { recursive: true });
-  try {
-    switchDurableDirectory(path.join(PROJECTS_DIR, name));
-  } catch (error) {
-    logger.error(`Could not open project "${name}"`, error);
-    return res.status(500).json({ success: false, error: (error as Error).message });
-  }
-  projectFs.writeFileSync(CURRENT_FILE, name + '\n');
-  logger.info(`Opened project "${name}" (${elements.size} elements)`);
+const projectDir = (p: string) => path.join(PROJECTS_DIR!, ...p.split('/'));
+const currentProject = (): string => {
+  try { return boardPath(projectFs.readFileSync(CURRENT_FILE!, 'utf8').trim()) ?? 'main'; } catch { return 'main'; }
+};
+const isBoard = (p: string) => p === currentProject() || projectFs.existsSync(path.join(projectDir(p), STATE_FILE));
+const within = (p: string, root: string) => p === root || p.startsWith(root + '/');
+// Every board and folder under PROJECTS_DIR. Boards hold no folders.
+function walkProjects() {
+  const boards: { path: string; updated: number; thumb: boolean }[] = [], folders: string[] = [];
+  const walk = (rel: string, depth: number) => {
+    for (const d of projectFs.readdirSync(rel ? projectDir(rel) : PROJECTS_DIR!, { withFileTypes: true })) {
+      const p = rel ? `${rel}/${d.name}` : d.name;
+      if (!d.isDirectory() || !boardPath(p) || boardPath(p) !== p) continue;
+      if (isBoard(p)) {
+        const st = (f: string) => { try { return projectFs.statSync(path.join(projectDir(p), f)).mtimeMs; } catch { return 0; } };
+        boards.push({ path: p, updated: Math.round(st(STATE_FILE)), thumb: st(THUMB_FILE) > 0 });
+      } else {
+        folders.push(p);
+        if (depth < 4) walk(p, depth + 1);
+      }
+    }
+  };
+  walk('', 0);
+  return { boards: boards.sort((a, b) => a.path.localeCompare(b.path)), folders: folders.sort() };
+}
+const projectsOff = (res: Response) => (!PROJECTS_DIR || !CURRENT_FILE ? (res.status(404).json({ success: false, error: 'projects off' }), true) : false);
+const sendScene = () => {
   const filesObj: Record<string, ExcalidrawFile> = {};
   files.forEach((f, id) => { filesObj[id] = f; });
-  broadcast({ type: 'project_opened', project: name } as any);
   broadcast({
     type: 'initial_elements',
     elements: Array.from(elements.values()),
     ...(files.size > 0 ? { files: filesObj } : {})
   } as InitialElementsMessage & { files?: Record<string, ExcalidrawFile> });
-  res.json({ success: true, current: name });
-});
+};
+const openBoard = (name: string) => {
+  projectFs.mkdirSync(projectDir(name), { recursive: true });
+  switchDurableDirectory(projectDir(name));
+  projectFs.writeFileSync(CURRENT_FILE!, name + '\n');
+  logger.info(`Opened project "${name}" (${elements.size} elements)`);
+  broadcast({ type: 'project_opened', project: name } as any);
+  sendScene();
+};
+// A board or folder may not sit inside a board.
+const parentIsBoard = (p: string) => p.split('/').slice(0, -1).some((_, i, a) => isBoard(a.slice(0, i + 1).join('/')));
 
-// Rename any project; the open one is moved in place.
-app.post('/api/projects/rename', (req: Request, res: Response) => {
-  if (!PROJECTS_DIR || !CURRENT_FILE) return res.status(404).json({ success: false, error: 'projects off' });
-  const from = String(req.body?.from ?? ''), to = String(req.body?.to ?? '');
-  if (!PROJECT_NAME.test(from) || !PROJECT_NAME.test(to)) return res.status(400).json({ success: false, error: 'name: lowercase letters, digits, dashes' });
-  if (!projectFs.existsSync(path.join(PROJECTS_DIR, from))) return res.status(404).json({ success: false, error: `no project ${from}` });
-  if (projectFs.existsSync(path.join(PROJECTS_DIR, to))) return res.status(409).json({ success: false, error: `${to} already exists` });
-  try {
-    if (from === currentProject()) {
-      renameDurableDirectory(path.join(PROJECTS_DIR, to));
-      projectFs.writeFileSync(CURRENT_FILE, to + '\n');
-    } else {
-      projectFs.renameSync(path.join(PROJECTS_DIR, from), path.join(PROJECTS_DIR, to));
-    }
-  } catch (error) {
-    logger.error(`Could not rename project "${from}"`, error);
+app.get('/api/projects', (_req: Request, res: Response) => {
+  if (projectsOff(res)) return;
+  const { boards, folders } = walkProjects();
+  res.json({ success: true, current: currentProject(), projects: boards.map(b => b.path), boards, folders });
+});
+app.post('/api/projects/open', (req: Request, res: Response) => {
+  if (projectsOff(res)) return;
+  const name = boardPath(req.body?.name);
+  if (!name) return res.status(400).json({ success: false, error: 'name: letters, digits, spaces, dashes; folders with /' });
+  if (name === currentProject()) return res.json({ success: true, current: name });
+  if (parentIsBoard(name)) return res.status(400).json({ success: false, error: 'a board cannot hold another board' });
+  if (projectFs.existsSync(projectDir(name)) && !isBoard(name)) return res.status(409).json({ success: false, error: `${name} is a folder` });
+  try { openBoard(name); } catch (error) {
+    logger.error(`Could not open project "${name}"`, error);
     return res.status(500).json({ success: false, error: (error as Error).message });
   }
-  logger.info(`Renamed project "${from}" to "${to}"`);
-  broadcast({ type: 'project_renamed', from, to } as any);
+  res.json({ success: true, current: name });
+});
+app.post('/api/projects/folder', (req: Request, res: Response) => {
+  if (projectsOff(res)) return;
+  const name = boardPath(req.body?.path);
+  if (!name) return res.status(400).json({ success: false, error: 'name: letters, digits, spaces, dashes' });
+  if (projectFs.existsSync(projectDir(name))) return res.status(409).json({ success: false, error: `${name} already exists` });
+  if (parentIsBoard(name)) return res.status(400).json({ success: false, error: 'a board cannot hold a folder' });
+  projectFs.mkdirSync(projectDir(name), { recursive: true });
+  broadcast({ type: 'projects_changed' } as any);
+  res.json({ success: true, path: name });
+});
+
+// Move or rename a board or a folder. The open board may be the one moved or inside it.
+const moveProject = (req: Request, res: Response) => {
+  if (projectsOff(res)) return;
+  const from = boardPath(req.body?.from), to = boardPath(req.body?.to);
+  if (!from || !to) return res.status(400).json({ success: false, error: 'name: letters, digits, spaces, dashes' });
+  if (from === to) return res.json({ success: true, current: currentProject() });
+  if (!projectFs.existsSync(projectDir(from))) return res.status(404).json({ success: false, error: `no project ${from}` });
+  if (within(to, from)) return res.status(400).json({ success: false, error: 'cannot move a folder into itself' });
+  // A case-only rename finds itself on macOS.
+  if (projectFs.existsSync(projectDir(to)) && from.toLowerCase() !== to.toLowerCase()) return res.status(409).json({ success: false, error: `${to} already exists` });
+  if (parentIsBoard(to)) return res.status(400).json({ success: false, error: 'a board cannot hold another board' });
+  const cur = currentProject();
+  try {
+    projectFs.mkdirSync(path.dirname(projectDir(to)), { recursive: true });
+    if (within(cur, from)) {
+      const next = to + cur.slice(from.length);
+      moveDurableDirectory(projectDir(from), projectDir(to), projectDir(next));
+      projectFs.writeFileSync(CURRENT_FILE!, next + '\n');
+    } else {
+      projectFs.renameSync(projectDir(from), projectDir(to));
+    }
+  } catch (error) {
+    logger.error(`Could not move project "${from}"`, error);
+    return res.status(500).json({ success: false, error: (error as Error).message });
+  }
+  logger.info(`Moved project "${from}" to "${to}"`);
+  if (currentProject() !== cur) broadcast({ type: 'project_renamed', from: cur, to: currentProject() } as any);
   broadcast({ type: 'projects_changed' } as any);
   res.json({ success: true, current: currentProject() });
-});
-// Delete = move to ../trash/<name>-<time>. Deleting the open one opens another first.
+};
+app.post('/api/projects/move', moveProject);
+app.post('/api/projects/rename', moveProject);
+
+// Delete = move to ../trash/<path with -- for />-<time>. Deleting the open board (or its folder) opens another first.
 app.post('/api/projects/delete', (req: Request, res: Response) => {
-  if (!PROJECTS_DIR || !CURRENT_FILE) return res.status(404).json({ success: false, error: 'projects off' });
-  const name = String(req.body?.name ?? '');
-  if (!PROJECT_NAME.test(name) || !projectFs.existsSync(path.join(PROJECTS_DIR, name))) return res.status(404).json({ success: false, error: `no project ${name}` });
-  const others = projectFs.readdirSync(PROJECTS_DIR, { withFileTypes: true })
-    .filter(d => d.isDirectory() && PROJECT_NAME.test(d.name) && d.name !== name).map(d => d.name).sort();
+  if (projectsOff(res)) return;
+  const name = boardPath(req.body?.name);
+  if (!name || !projectFs.existsSync(projectDir(name))) return res.status(404).json({ success: false, error: `no project ${name}` });
   try {
-    if (name === currentProject()) {
-      const next = others[0] ?? 'main';
-      projectFs.mkdirSync(path.join(PROJECTS_DIR, next), { recursive: true });
-      switchDurableDirectory(path.join(PROJECTS_DIR, next));
-      projectFs.writeFileSync(CURRENT_FILE, next + '\n');
-      const filesObj: Record<string, ExcalidrawFile> = {};
-      files.forEach((f, id) => { filesObj[id] = f; });
-      broadcast({ type: 'project_opened', project: next } as any);
-      broadcast({ type: 'initial_elements', elements: Array.from(elements.values()), ...(files.size > 0 ? { files: filesObj } : {}) } as InitialElementsMessage & { files?: Record<string, ExcalidrawFile> });
+    if (within(currentProject(), name)) {
+      const next = walkProjects().boards.map(b => b.path).find(p => !within(p, name)) ?? (within('main', name) ? 'inbox' : 'main');
+      openBoard(next);
     }
-    const trash = path.join(PROJECTS_DIR, '..', 'trash');
+    const trash = path.join(PROJECTS_DIR!, '..', 'trash');
     projectFs.mkdirSync(trash, { recursive: true });
-    projectFs.renameSync(path.join(PROJECTS_DIR, name), path.join(trash, `${name}-${new Date().toISOString().replace(/[:.]/g, '-')}`));
+    projectFs.renameSync(projectDir(name), path.join(trash, `${name.replace(/\//g, '--')}-${new Date().toISOString().replace(/[:.]/g, '-')}`));
   } catch (error) {
     logger.error(`Could not delete project "${name}"`, error);
     return res.status(500).json({ success: false, error: (error as Error).message });
@@ -1641,6 +1691,23 @@ app.post('/api/projects/delete', (req: Request, res: Response) => {
   logger.info(`Deleted project "${name}" (moved to trash)`);
   broadcast({ type: 'projects_changed' } as any);
   res.json({ success: true, current: currentProject() });
+});
+
+// Thumbnails for the Projects view. Only the canvas tab writes one (for the open board, scratch areas left out).
+app.post('/api/projects/thumb', express.raw({ type: 'image/png', limit: '2mb' }), (req: Request, res: Response) => {
+  if (projectsOff(res)) return;
+  if (!isTab(req)) return res.status(403).json({ success: false, error: 'canvas tab only' });
+  const name = boardPath(req.header('x-canvas-project'));
+  if (!name || name !== currentProject() || !Buffer.isBuffer(req.body) || !req.body.length) return res.status(409).json({ success: false, error: 'not the open board' });
+  projectFs.writeFileSync(path.join(projectDir(name), THUMB_FILE), req.body);
+  res.json({ success: true });
+});
+app.get('/api/projects/thumb', (req: Request, res: Response) => {
+  if (projectsOff(res)) return;
+  const name = boardPath(req.query.path);
+  const file = name && path.join(projectDir(name), THUMB_FILE);
+  if (!file || !projectFs.existsSync(file)) return res.status(404).end();
+  res.set('Cache-Control', 'no-cache').sendFile(path.resolve(file));
 });
 
 app.get('/health', (req: Request, res: Response) => {

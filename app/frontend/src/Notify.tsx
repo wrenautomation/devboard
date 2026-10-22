@@ -3,6 +3,7 @@
 // Claude then screenshots only that part, which keeps the image small. Mic = Safari speech to text.
 import React, { useEffect, useState } from 'react'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
+import { Send } from 'lucide-react'
 import { BoxDraw, boxStyle, toScreen, type Box } from './BoxDraw'
 import { appendSaid, canDictate, useDictation } from './speech'
 
@@ -64,7 +65,7 @@ export function Notify({ api, flush }: { api: ExcalidrawImperativeAPI | null; fl
           onCancel={() => { setMarking(false); setOpen(true) }} />
       )}
       {shown && <div className="nt-box nt-box-set" style={boxStyle(shown)} />}
-      <button className={`btn-secondary notify-toggle ${open ? 'on' : ''}`} onClick={() => setOpen(o => !o)} aria-expanded={open}>Send to Claude</button>
+      <button className={`btn-secondary notify-toggle ${open ? 'on' : ''}`} onClick={() => setOpen(o => !o)} aria-expanded={open} aria-label="Send to Claude"><Send size={17} /><span className="hb-word">Send to Claude</span></button>
       {open && (
         <div className="nt-pop">
           <div className="nt-area">

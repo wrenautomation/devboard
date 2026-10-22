@@ -30,9 +30,8 @@ if (mode === 'canvas') {
   child.on('exit', code => process.exit(code ?? 1))
 } else if (mode === 'backup') {
   const git = (...a) => execFileSync('git', a, { cwd: path.join(DIR, 'projects'), encoding: 'utf8' })
-  for (const p of fs.readdirSync(path.join(DIR, 'projects'))) {
-    const f = path.join(DIR, 'projects', p, 'canvas-state-v1.json')
-    if (fs.existsSync(f)) JSON.parse(fs.readFileSync(f, 'utf8')) // a broken board stops the backup
+  for (const f of fs.readdirSync(path.join(DIR, 'projects'), { recursive: true })) {
+    if (path.basename(f) === 'canvas-state-v1.json' && !f.startsWith('.git')) JSON.parse(fs.readFileSync(path.join(DIR, 'projects', f), 'utf8')) // a broken board stops the backup
   }
   git('add', '-A')
   try { git('diff', '--cached', '--quiet'); console.log(`${new Date().toISOString()} no board changes`); process.exit(0) } catch {}
