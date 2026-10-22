@@ -6,7 +6,8 @@ import {
   exportToBlob,
   exportToSvg,
   elementsOverlappingBBox,
-  useHandleLibrary
+  useHandleLibrary,
+  newElementWith
 } from '@excalidraw/excalidraw'
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
@@ -91,7 +92,8 @@ const libraryAdapter: LibraryPersistenceAdapter = {
 // Local patch: drafts. Edits the Mac hasn't confirmed are kept in this browser per project, so a
 // dropped connection, a killed tab or a reload never loses them; they go up on the next connect.
 type Draft = { elements: unknown[]; version: number; at: number }
-const draftKey = (project: string) => `draft:${project}`
+// v2: v1 drafts could hold another board's scene (saved under the new name during a switch); they are ignored.
+const draftKey = (project: string) => `draft2:${project}`
 const idb = async <T,>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> => {
   const db = await libraryDb()
   return new Promise<T>((resolve, reject) => {
@@ -110,10 +112,13 @@ const simplifyIndexes = (pts: readonly (readonly number[])[], eps: number): numb
   while (stack.length) {
     const [a, b] = stack.pop()!
     const [ax, ay] = pts[a]!, [bx, by] = pts[b]!
-    const len = Math.hypot(bx - ax, by - ay) || 1
+    const len = Math.hypot(bx - ax, by - ay)
     let far = -1, dmax = eps
     for (let i = a + 1; i < b; i++) {
-      const d = Math.abs((by - ay) * pts[i]![0]! - (bx - ax) * pts[i]![1]! + bx * ay - by * ax) / len
+      // Ends that meet (a closed O or triangle): no line to measure from, so use distance to the end point.
+      const d = len < 1e-6
+        ? Math.hypot(pts[i]![0]! - ax, pts[i]![1]! - ay)
+        : Math.abs((by - ay) * pts[i]![0]! - (bx - ax) * pts[i]![1]! + bx * ay - by * ax) / len
       if (d > dmax) { dmax = d; far = i }
     }
     if (far >= 0) { keep[far] = 1; stack.push([a, far], [far, b]) }
@@ -215,9 +220,12 @@ function App(): JSX.Element {
   })
   const [isConnected, setIsConnected] = useState<boolean>(false)
   const projectRef = useRef<string | null>(null)
+  // The board the scene on screen belongs to. projectRef moves at project_opened, before the new scene
+  // arrives; drafts, syncs and thumbnails of the old scene must still name the old board.
+  const sceneProjectRef = useRef<string | null>(null)
   const thumbAtRef = useRef(0)
   const saveThumb = async () => {
-    const api = excalidrawAPIRef.current, project = projectRef.current
+    const api = excalidrawAPIRef.current, project = sceneProjectRef.current
     if (api && project) await postThumb(api, project).catch(() => {})
   }
   const syncedVersionRef = useRef<number>(0)
@@ -314,7 +322,7 @@ function App(): JSX.Element {
       sceneVersion(api.getSceneElementsIncludingDeleted()) !== syncedVersionRef.current
   }
   const saveDraftNow = (): void => {
-    const api = excalidrawAPIRef.current, project = projectRef.current
+    const api = excalidrawAPIRef.current, project = sceneProjectRef.current
     if (!api || !project || !isDirty()) return
     void writeDraft(project, {
       elements: api.getSceneElementsIncludingDeleted().filter(el => !el.isDeleted),
@@ -408,6 +416,11 @@ function App(): JSX.Element {
     } catch (error) {
       applySceneUpdateWithoutAutoSync(api, { elements: previous, captureUpdate: CaptureUpdateAction.NEVER })
       throw error
+    }
+    if (sceneProjectRef.current !== projectRef.current) {
+      // Another board: its undo steps would replay the old board's shapes here.
+      api.history.clear()
+      sceneProjectRef.current = projectRef.current
     }
     sceneLoadStatusRef.current = 'ready'
     setSceneLoadStatus('ready')
@@ -675,6 +688,7 @@ function App(): JSX.Element {
         case 'project_renamed': {
           const { from, to } = data as any
           if (projectRef.current === from) projectRef.current = to
+          if (sceneProjectRef.current === from) sceneProjectRef.current = to
           void readDraft(from).then(d => d && writeDraft(to, d).then(() => dropDraft(from)))
           window.dispatchEvent(new CustomEvent('canvas-project', { detail: projectRef.current }))
           break
@@ -1029,7 +1043,7 @@ function App(): JSX.Element {
         headers: {
           'Content-Type': 'application/json',
           ...TAB,
-          ...(projectRef.current ? { 'x-canvas-project': projectRef.current } : {}),
+          ...(sceneProjectRef.current ? { 'x-canvas-project': sceneProjectRef.current } : {}),
         },
         body: JSON.stringify({
           elements: backendElements,
@@ -1040,8 +1054,8 @@ function App(): JSX.Element {
       if (response.ok) {
         const result: ApiResponse = await response.json()
         syncedVersionRef.current = sentVersion
-        if (projectRef.current && sceneVersion(api.getSceneElementsIncludingDeleted()) === sentVersion) {
-          void dropDraft(projectRef.current)
+        if (sceneProjectRef.current && sceneVersion(api.getSceneElementsIncludingDeleted()) === sentVersion) {
+          void dropDraft(sceneProjectRef.current)
         }
         // A fresh thumbnail at most once a minute while the board changes.
         if (Date.now() - thumbAtRef.current > 60_000) { thumbAtRef.current = Date.now(); void saveThumb() }
@@ -1099,21 +1113,17 @@ function App(): JSX.Element {
     }, AUTO_SYNC_DEBOUNCE_MS)
   }
 
-  const clearCanvas = async (): Promise<void> => {
-    if (!canSyncScene()) return
-    const generation = pauseSceneSync()
-    try {
-      const response = await fetch('/api/elements/clear', {
-        method: 'DELETE', signal: AbortSignal.timeout(10000), headers: TAB
-      })
-      if (!response.ok) throw new Error('Could not clear the saved canvas')
-      // The server broadcasts canvas_cleared. HTTP is a fallback when that
-      // message has not arrived; do not overwrite a newer WebSocket scene.
-      if (generation === sceneGenerationRef.current) await loadExistingElements()
-    } catch (error) {
-      failSceneLoad(error, generation)
-    }
+  // An ordinary edit: every shape deleted in one undo step, then saved. Undo brings them back.
+  const clearCanvas = (): void => {
+    const api = excalidrawAPIRef.current
+    if (!api || !canSyncScene()) return
+    api.updateScene({
+      elements: api.getSceneElementsIncludingDeleted().map(el => (el.isDeleted ? el : newElementWith(el, { isDeleted: true }))),
+      captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+    })
+    void syncToBackend({ silent: true })
   }
+
 
   return (
     <div className="app" data-theme={theme}>
