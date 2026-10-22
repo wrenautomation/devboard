@@ -4,13 +4,14 @@
 // It reconnects by itself and keeps the last note id in watch/<name>.last, so a restart gets missed notes.
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const args = process.argv.slice(2)
 const flag = k => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : undefined }
 const name = flag('--name') ?? 'session'
 if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(name)) { console.error('--name: lowercase letters, digits, dashes'); process.exit(2) }
 const url = process.env.EXPRESS_SERVER_URL ?? 'http://127.0.0.1:3100'
-const dir = path.join(process.env.HOME, '.config/excalidraw-canvas/watch')
+const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../watch')
 const lastFile = path.join(dir, `${name}.last`)
 fs.mkdirSync(dir, { recursive: true })
 // First run starts from now; --all replays the kept history.

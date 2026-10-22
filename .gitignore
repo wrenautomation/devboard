@@ -1,32 +1,11 @@
-# Dependencies
-node_modules/
-
-# Build artifacts
-dist/
-public/dist/
-
-# Environment files
-.env
-
-# Logs
+# Secrets and runtime state
+tunnel.token
+current
+notes.jsonl
+watch/
+trash/
+backups/
+projects/*/canvas-state.lock
+projects/**/.tmp-*
 *.log
-
-# Editor artifacts
-.cursor/
-.claude/
-.agent/
-.agents/
-
-# Development artifacts
-*.excalidraw
-canvas-state-v1.json
-canvas-state.lock
-.excalidraw-state/
-
 .DS_Store
-
-docs/
-
-# Browser regression artifacts
-test-results/
-playwright-report/
