@@ -2,8 +2,9 @@
 // Tap an item to drop it at the middle of the view, or drag it sideways onto the canvas (no long press).
 // Excalidraw 0.18's own library has no search.
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { exportToSvg, restoreElements, CaptureUpdateAction } from '@excalidraw/excalidraw'
+import { exportToSvg, restoreElements } from '@excalidraw/excalidraw'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
+import { placeOnCanvas, type Drop } from './place'
 
 type PackItem = { id: string; name: string; category: string; tags?: string; elements: any[] }
 
@@ -41,9 +42,8 @@ const SYNONYMS: Record<string, string[]> = {
   website: ['web app', 'webflow', 'wordpress', 'framer'], decision: ['condition', 'yes no'],
 }
 
-type Drop = { x: number; y: number }
 
-// Sideways drag past 8px starts a drag; a vertical move stays a list scroll (touch-action: pan-y).
+// Finger: a sideways drag past 8px starts a drag; a vertical move stays a list scroll (touch-action: pan-y). Pen: any move past 6px.
 function Tile({ item, onPick }: { item: PackItem; onPick: (i: PackItem, at?: Drop) => void }) {
   const ref = useRef<HTMLButtonElement>(null)
   const dragged = useRef(false)
@@ -60,13 +60,16 @@ function Tile({ item, onPick }: { item: PackItem; onPick: (i: PackItem, at?: Dro
 
   const down = (e: React.PointerEvent) => {
     if (e.button !== 0) return
+    // A pen does not scroll the list: any move drags. preventDefault stops Safari taking the stroke for a scroll or text select.
+    const pen = e.pointerType === 'pen'
+    if (pen) { e.preventDefault(); try { ref.current?.setPointerCapture(e.pointerId) } catch { /* pointer already gone */ } }
     const x0 = e.clientX, y0 = e.clientY
     let ghost: HTMLDivElement | null = null
     dragged.current = false
     const move = (m: PointerEvent) => {
       if (!ghost) {
         const dx = Math.abs(m.clientX - x0), dy = Math.abs(m.clientY - y0)
-        if (dx < 8 || dx < dy) return
+        if (pen ? Math.hypot(dx, dy) < 6 : dx < 8 || dx < dy) return
         ghost = document.createElement('div')
         ghost.className = 'icon-ghost'
         ghost.innerHTML = svg
@@ -97,38 +100,6 @@ function Tile({ item, onPick }: { item: PackItem; onPick: (i: PackItem, at?: Dro
       <span className="icon-name">{item.name}</span>
     </button>
   )
-}
-
-const newId = () => Math.random().toString(36).slice(2, 12) + Date.now().toString(36).slice(-4)
-
-// Copies an item with fresh ids (groups, text containers and arrow bindings remapped) centred at x,y.
-function cloneAt(elements: any[], cx: number, cy: number) {
-  const ids = new Map<string, string>(), groups = new Map<string, string>()
-  const id = (old: string) => { if (!ids.has(old)) ids.set(old, newId()); return ids.get(old)! }
-  const gid = (old: string) => { if (!groups.has(old)) groups.set(old, newId()); return groups.get(old)! }
-  const x0 = Math.min(...elements.map(e => e.x)), y0 = Math.min(...elements.map(e => e.y))
-  const x1 = Math.max(...elements.map(e => e.x + (e.width || 0))), y1 = Math.max(...elements.map(e => e.y + (e.height || 0)))
-  const dx = cx - (x0 + x1) / 2, dy = cy - (y0 + y1) / 2
-  const known = new Set(elements.map(e => e.id))
-  const keep = (old?: string | null) => (old && known.has(old) ? id(old) : null)
-  return elements.map(e => ({
-    ...e,
-    id: id(e.id),
-    x: e.x + dx,
-    y: e.y + dy,
-    groupIds: (e.groupIds || []).map(gid),
-    frameId: null,
-    containerId: keep(e.containerId),
-    boundElements: e.boundElements?.filter((b: any) => known.has(b.id)).map((b: any) => ({ ...b, id: id(b.id) })) ?? null,
-    startBinding: e.startBinding && known.has(e.startBinding.elementId) ? { ...e.startBinding, elementId: id(e.startBinding.elementId) } : null,
-    endBinding: e.endBinding && known.has(e.endBinding.elementId) ? { ...e.endBinding, elementId: id(e.endBinding.elementId) } : null,
-    seed: Math.floor(Math.random() * 2 ** 31),
-    version: 1,
-    versionNonce: Math.floor(Math.random() * 2 ** 31),
-    updated: Date.now(),
-    isDeleted: false,
-    locked: false,
-  }))
 }
 
 export function IconPanel({ api, onClose }: { api: ExcalidrawImperativeAPI | null; onClose: () => void }) {
@@ -170,20 +141,7 @@ export function IconPanel({ api, onClose }: { api: ExcalidrawImperativeAPI | nul
     return [...by]
   }, [shown, query])
 
-  // at = the drop point on screen; none = the middle of the view.
-  const pick = (item: PackItem, at?: Drop) => {
-    if (!api) return
-    const s = api.getAppState()
-    const zoom = s.zoom.value
-    const sx = at ? at.x - s.offsetLeft : s.width / 2, sy = at ? at.y - s.offsetTop : s.height / 2
-    const cx = sx / zoom - s.scrollX, cy = sy / zoom - s.scrollY
-    const added = restoreElements(cloneAt(item.elements, cx, cy), null)
-    api.updateScene({
-      elements: [...api.getSceneElementsIncludingDeleted(), ...added],
-      appState: { selectedElementIds: Object.fromEntries(added.map(e => [e.id, true])) as any },
-      captureUpdate: CaptureUpdateAction.IMMEDIATELY,
-    })
-  }
+  const pick = (item: PackItem, at?: Drop) => { if (api) placeOnCanvas(api, item.elements, at) }
 
   return (
     <aside className="icon-panel" aria-label="Icons">
