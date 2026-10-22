@@ -30,6 +30,7 @@ Three interfaces drive the same live canvas. Pick the first one that applies:
 - Save finished diagrams with `export --out <repo>/designs/<name>.excalidraw`.
 - Notes from the canvas: William selects shapes, taps **Send to Claude**, and types or speaks a note. To receive notes, start the **Monitor** tool with `draw watch --name <short-session-name>` (timeout_ms 1800000). Re-arm it each time it expires. Pick a name for your task (lowercase, digits, dashes). He can target one session as `@name` or send to all.
 - Each note is one line: `[canvas note <id>] project <p>, marked area | N shape(s) at x y wxh: "<text>". Look: <command>`. A marked area is a box William dragged over the canvas. Run the Look command (`draw screenshot --area x,y,w,h`, `--ids ...` or `draw describe`), read the image, then do what the note asks. The scene is saved before the note goes out. If `project` is not the open project, the note is old: say so.
+- Scratch areas: a frame named `Scratch…` holds William's rough work. You never see what is inside it (reads, search, screenshots and notes all skip it). Do not draw inside it, and do not move or delete it (the server refuses). A clear or a replace keeps it.
 - A restarted watch with the same name gets the notes it missed. `--all` replays the last 200.
 
 Screenshots and image exports render headless inside the canvas server, so you never need a browser tab to check your own work. Only mermaid conversion and viewport control need an open tab (CLI exits with code 4 when it's missing; ask William to open the iPad page).

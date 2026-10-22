@@ -3,8 +3,7 @@
 // Claude then screenshots only that part, which keeps the image small. Mic = Safari speech to text.
 import React, { useEffect, useRef, useState } from 'react'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
-
-type Box = { x: number; y: number; w: number; h: number }
+import { BoxDraw, boxStyle, toScreen, type Box } from './BoxDraw'
 
 const Speech: any = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition
 
@@ -18,7 +17,6 @@ export function Notify({ api, flush }: { api: ExcalidrawImperativeAPI | null; fl
   const [listening, setListening] = useState(false)
   const [area, setArea] = useState<Box | null>(null) // scene coords
   const [marking, setMarking] = useState(false)
-  const [drag, setDrag] = useState<Box | null>(null) // screen coords, while marking
   const [, setView] = useState(0)
   const rec = useRef<any>(null)
 
@@ -28,48 +26,6 @@ export function Notify({ api, flush }: { api: ExcalidrawImperativeAPI | null; fl
     read()
     return api.onChange(read)
   }, [api])
-
-  // The marked box follows the canvas when it pans or zooms.
-  const toScreen = (b: Box): Box | null => {
-    if (!api) return null
-    const s = api.getAppState(), z = s.zoom.value
-    return { x: (b.x + s.scrollX) * z + s.offsetLeft, y: (b.y + s.scrollY) * z + s.offsetTop, w: b.w * z, h: b.h * z }
-  }
-  const toScene = (b: Box): Box | null => {
-    if (!api) return null
-    const s = api.getAppState(), z = s.zoom.value
-    return { x: (b.x - s.offsetLeft) / z - s.scrollX, y: (b.y - s.offsetTop) / z - s.scrollY, w: b.w / z, h: b.h / z }
-  }
-
-  const markDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    e.currentTarget.setPointerCapture(e.pointerId)
-    const x0 = e.clientX, y0 = e.clientY
-    setDrag({ x: x0, y: y0, w: 0, h: 0 })
-    const el = e.currentTarget
-    const move = (m: PointerEvent) => setDrag({ x: Math.min(x0, m.clientX), y: Math.min(y0, m.clientY), w: Math.abs(m.clientX - x0), h: Math.abs(m.clientY - y0) })
-    const up = (u: PointerEvent) => {
-      el.removeEventListener('pointermove', move)
-      el.removeEventListener('pointerup', up)
-      el.removeEventListener('pointercancel', up)
-      const b = { x: Math.min(x0, u.clientX), y: Math.min(y0, u.clientY), w: Math.abs(u.clientX - x0), h: Math.abs(u.clientY - y0) }
-      setDrag(null)
-      if (u.type === 'pointerup' && b.w > 12 && b.h > 12) {
-        const scene = toScene(b)
-        if (scene) { setArea(scene); setStatus('') }
-        setMarking(false)
-        setOpen(true)
-      }
-    }
-    el.addEventListener('pointermove', move)
-    el.addEventListener('pointerup', up)
-    el.addEventListener('pointercancel', up)
-  }
-
-  useEffect(() => {
-    if (!open) return
-    setStatus('')
-    fetch('/api/watchers').then(r => r.json()).then(d => setWatchers(d.watchers ?? [])).catch(() => setWatchers([]))
-  }, [open])
 
   const mic = () => {
     if (listening) { rec.current?.stop(); return }
@@ -117,16 +73,15 @@ export function Notify({ api, flush }: { api: ExcalidrawImperativeAPI | null; fl
     }
   }
 
-  const shown = area && !marking ? toScreen(area) : null
-  const boxStyle = (b: Box) => ({ left: b.x, top: b.y, width: b.w, height: b.h })
+  // The marked box follows the canvas when it pans or zooms (onChange re-renders).
+  const shown = api && area && !marking ? toScreen(api, area) : null
 
   return (
     <div className="notify">
-      {marking && (
-        <div className="nt-mark" onPointerDown={markDown}>
-          <div className="nt-mark-hint">Drag a box over the part to check <button onPointerDown={e => e.stopPropagation()} onClick={() => { setMarking(false); setOpen(true) }}>Cancel</button></div>
-          {drag && <div className="nt-box" style={boxStyle(drag)} />}
-        </div>
+      {marking && api && (
+        <BoxDraw api={api} hint="Drag a box over the part to check"
+          onDone={b => { setArea(b); setStatus(''); setMarking(false); setOpen(true) }}
+          onCancel={() => { setMarking(false); setOpen(true) }} />
       )}
       {shown && <div className="nt-box nt-box-set" style={boxStyle(shown)} />}
       <button className={`btn-secondary notify-toggle ${open ? 'on' : ''}`} onClick={() => setOpen(o => !o)} aria-expanded={open}>Send to Claude</button>

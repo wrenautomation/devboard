@@ -329,12 +329,48 @@ const UpdateElementSchema = z.object({
   scale: z.tuple([z.number(), z.number()]).optional(),
 }).passthrough();
 
+// Local patch: scratch areas. A frame named "Scratch…" holds rough work that must never reach a model.
+// Agents (CLI, MCP, curl) never see what is inside one; only the canvas tab (header x-devboard-tab: 1) does.
+// The frame itself stays visible, so an agent knows not to draw there, but an agent cannot move or delete it.
+const SCRATCH_NAME = /^scratch/i;
+const isTab = (req: Request) => req.get('x-devboard-tab') === '1';
+const isScratchFrame = (e: ServerElement | undefined) => !!e && e.type === 'frame' && SCRATCH_NAME.test(String((e as any).name ?? ''));
+function scratchHidden(): Set<string> {
+  const all = Array.from(elements.values());
+  const frames = all.filter(isScratchFrame);
+  const hidden = new Set<string>();
+  if (!frames.length) return hidden;
+  const frameIds = new Set(frames.map(f => f.id));
+  // Inside = assigned to the frame, or centre inside it (Excalidraw assigns only shapes drawn fully inside).
+  const inside = (e: ServerElement) => {
+    const cx = e.x + (e.width ?? 0) / 2, cy = e.y + (e.height ?? 0) / 2;
+    return frames.some(f => cx >= f.x && cx <= f.x + (f.width ?? 0) && cy >= f.y && cy <= f.y + (f.height ?? 0));
+  };
+  for (const e of all) {
+    if (!frameIds.has(e.id) && ((e.frameId && frameIds.has(e.frameId)) || inside(e))) hidden.add(e.id);
+  }
+  for (const e of all) if ((e as any).containerId && hidden.has((e as any).containerId)) hidden.add(e.id);
+  return hidden;
+}
+function visibleTo<T extends { id: string }>(req: Request, list: T[]): T[] {
+  if (isTab(req)) return list;
+  const hidden = scratchHidden();
+  return hidden.size ? list.filter(e => !hidden.has(e.id)) : list;
+}
+// An agent may not read, change or delete scratch work, nor move or delete a scratch frame.
+function scratchBlock(req: Request, res: Response, id: string, write: boolean): boolean {
+  if (isTab(req)) return false;
+  if (scratchHidden().has(id)) { res.status(404).json({ success: false, error: `Element with ID ${id} not found` }); return true; }
+  if (write && isScratchFrame(elements.get(id))) { res.status(403).json({ success: false, error: 'This is a scratch area. Only William changes it.' }); return true; }
+  return false;
+}
+
 // API Routes
 
 // Get all elements
 app.get('/api/elements', (req: Request, res: Response) => {
   try {
-    const elementsArray = Array.from(elements.values());
+    const elementsArray = visibleTo(req, Array.from(elements.values()));
     res.json({
       success: true,
       elements: elementsArray,
@@ -399,6 +435,7 @@ app.put('/api/elements/:id', (req: Request, res: Response) => {
     const { id } = req.params;
     const body = req.body && typeof req.body === 'object' ? req.body : {};
     const updates = UpdateElementSchema.parse({ id, ...body });
+    if (id && scratchBlock(req, res, id, true)) return;
 
     if (!id) {
       return res.status(400).json({
@@ -484,13 +521,17 @@ app.put('/api/elements/:id', (req: Request, res: Response) => {
 // Clear all elements (must be before /:id route)
 app.delete('/api/elements/clear', (req: Request, res: Response) => {
   try {
-    const count = elements.size;
-    commitCanvasMutation(() => elements.clear());
+    // An agent's clear keeps scratch frames and their contents.
+    const hidden = isTab(req) ? new Set<string>() : scratchHidden();
+    const kept = isTab(req) ? [] : Array.from(elements.values()).filter(e => hidden.has(e.id) || isScratchFrame(e));
+    const count = elements.size - kept.length;
+    commitCanvasMutation(() => { elements.clear(); kept.forEach(e => elements.set(e.id, e)); });
 
     broadcast({
       type: 'canvas_cleared',
       timestamp: new Date().toISOString()
     });
+    if (kept.length) broadcast({ type: 'elements_batch_created', elements: kept } as BatchCreatedMessage);
 
     logger.info(`Canvas cleared: ${count} elements removed`);
 
@@ -526,6 +567,7 @@ app.delete('/api/elements/:id', (req: Request, res: Response) => {
         error: `Element with ID ${id} not found`
       });
     }
+    if (scratchBlock(req, res, id, true)) return;
 
     commitCanvasMutation(() => elements.delete(id));
 
@@ -553,7 +595,7 @@ app.delete('/api/elements/:id', (req: Request, res: Response) => {
 app.get('/api/elements/search', (req: Request, res: Response) => {
   try {
     const { type, x_min, x_max, y_min, y_max, ...filters } = req.query;
-    let results = Array.from(elements.values());
+    let results = visibleTo(req, Array.from(elements.values()));
 
     // Filter by type if specified
     if (type && typeof type === 'string') {
@@ -618,6 +660,7 @@ app.get('/api/elements/:id', (req: Request, res: Response) => {
         error: `Element with ID ${id} not found`
       });
     }
+    if (scratchBlock(req, res, id, false)) return;
 
     res.json({
       success: true,
@@ -809,9 +852,12 @@ app.post('/api/elements/batch', (req: Request, res: Response) => {
     // not resolve bindings against elements that are about to be discarded.
     resolveArrowBindings(createdElements, !replace);
 
-    const replacedCount = replace ? elements.size : 0;
+    // An agent's replace keeps scratch frames and their contents.
+    const hidden = replace && !isTab(req) ? scratchHidden() : new Set<string>();
+    const kept = replace && !isTab(req) ? Array.from(elements.values()).filter(e => hidden.has(e.id) || isScratchFrame(e)) : [];
+    const replacedCount = replace ? elements.size - kept.length : 0;
     commitCanvasMutation(() => {
-      if (replace) elements.clear();
+      if (replace) { elements.clear(); kept.forEach(e => elements.set(e.id, e)); }
       createdElements.forEach(el => elements.set(el.id, el));
     });
 
@@ -827,7 +873,7 @@ app.post('/api/elements/batch', (req: Request, res: Response) => {
     // Broadcast to all connected clients
     const message: BatchCreatedMessage = {
       type: 'elements_batch_created',
-      elements: createdElements
+      elements: [...kept.filter(e => !createdElements.some(c => c.id === e.id)), ...createdElements]
     };
     broadcast(message);
 
@@ -917,8 +963,12 @@ app.post('/api/elements/sync', (req: Request, res: Response) => {
     let successCount = 0;
     const processedElements: ServerElement[] = [];
 
+    // A sync that is not from the canvas tab keeps scratch frames and their contents.
+    const hidden = isTab(req) ? new Set<string>() : scratchHidden();
+    const kept = isTab(req) ? [] : Array.from(elements.values()).filter(e => hidden.has(e.id) || isScratchFrame(e));
     commitCanvasMutation(() => {
       elements.clear();
+      kept.forEach(e => elements.set(e.id, e));
       frontendElements.forEach((element: any, index: number) => {
         try {
           // Ensure element has ID, generate one if missing
@@ -1123,7 +1173,7 @@ app.post('/api/export/image', async (req: Request, res: Response) => {
       return res.status(503).json({ success: false, error: NO_BROWSER_TAB_ERROR });
     }
     try {
-      const result = await exportViaBrowserTab(options);
+      const result = await exportViaBrowserTab({ ...options, hide: [...scratchHidden()] } as ExportImageBody);
       res.json({ success: true, format: result.format, data: result.data, renderer: 'browser' });
     } catch (error) {
       res.status(500).json({ success: false, error: (error as Error).message });
@@ -1134,7 +1184,7 @@ app.post('/api/export/image', async (req: Request, res: Response) => {
 
   try {
     const { renderer: _renderer, ...renderOptions } = options;
-    const scene = { elements: Array.from(elements.values()), files: Object.fromEntries(files) };
+    const scene = { elements: visibleTo(req, Array.from(elements.values())), files: Object.fromEntries(files) };
     const result = await renderScene(scene, renderOptions);
     res.json({
       success: true,
@@ -1429,7 +1479,7 @@ app.get('/api/snapshots/:name', (req: Request, res: Response) => {
 
     res.json({
       success: true,
-      snapshot
+      snapshot: { ...snapshot, elements: visibleTo(req, snapshot.elements) }
     });
   } catch (error) {
     logger.error('Error fetching snapshot:', error);
@@ -1466,7 +1516,8 @@ const sendNote = (res: Response, n: Note) => res.write(`id: ${n.id}\ndata: ${JSO
 const forWatcher = (n: Note, name: string) => !n.to || n.to === name;
 app.post('/api/notify', (req: Request, res: Response) => {
   const text = String(req.body?.text ?? '').trim().slice(0, 4000);
-  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String).slice(0, 500) : [];
+  const hidden = scratchHidden(); // a note never points Claude at scratch work
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String).filter((id: string) => !hidden.has(id)).slice(0, 500) : [];
   const b = req.body?.box;
   const box = b && [b.x, b.y, b.w, b.h].every(Number.isFinite) ? { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.w), h: Math.round(b.h) } : undefined;
   // area: the box is a marked area, not the bounds of the selected shapes.

@@ -19,9 +19,13 @@ import { cleanElementForExcalidraw, prepareServerScene, assertScenePreserved } f
 import { preloadCanvasFonts } from './utils/fonts'
 import { IconPanel } from './IconPanel'
 import { Notify } from './Notify'
+import { Scratch } from './Scratch'
 import { StrokeWidth } from './StrokeWidth'
 import type { ServerElement } from './utils/scene'
 import type { MermaidConfig } from '@excalidraw/mermaid-to-excalidraw'
+
+// Local patch: marks the canvas tab, so the server shows it scratch areas (agents get them hidden).
+const TAB = { 'x-devboard-tab': '1' }
 
 const LIBRARY_STORAGE_KEY = 'excalidraw-canvas-library'
 
@@ -192,6 +196,7 @@ interface ExportImageOptions {
   elementIds?: string[];
   frameId?: string;
   area?: { x: number; y: number; w: number; h: number };
+  hide?: string[];
   embedScene?: boolean;
 }
 
@@ -517,7 +522,7 @@ function App(): JSX.Element {
     if (!excalidrawAPIRef.current) return
     const generation = pauseSceneSync()
     try {
-      const response = await fetch('/api/elements', { signal: AbortSignal.timeout(10000) })
+      const response = await fetch('/api/elements', { signal: AbortSignal.timeout(10000), headers: TAB }) // the tab sees scratch areas; agents do not
       const result: ApiResponse = await response.json()
       if (generation !== sceneGenerationRef.current) return
       if (!response.ok || !result.success || !Array.isArray(result.elements)) {
@@ -738,7 +743,8 @@ function App(): JSX.Element {
               const opts = data.options ?? {}
               const embedScene = opts.embedScene === true
               if (embedScene && data.format !== 'png') throw new Error('embedScene is only supported for PNG exports')
-              const allElements = excalidrawAPI.getSceneElements()
+              const hide = new Set<string>(opts.hide ?? []) // scratch work never goes into an export for an agent
+              const allElements = excalidrawAPI.getSceneElements().filter(el => !hide.has(el.id))
               const wanted = opts.elementIds ? new Set(opts.elementIds) : null
               const elements = wanted
                 ? allElements.filter(el => wanted.has(el.id) || (el.type === 'text' && (el as any).containerId && wanted.has((el as any).containerId)))
@@ -1067,6 +1073,7 @@ function App(): JSX.Element {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...TAB,
           ...(projectRef.current ? { 'x-canvas-project': projectRef.current } : {}),
         },
         body: JSON.stringify({
@@ -1140,7 +1147,7 @@ function App(): JSX.Element {
     const generation = pauseSceneSync()
     try {
       const response = await fetch('/api/elements/clear', {
-        method: 'DELETE', signal: AbortSignal.timeout(10000)
+        method: 'DELETE', signal: AbortSignal.timeout(10000), headers: TAB
       })
       if (!response.ok) throw new Error('Could not clear the saved canvas')
       // The server broadcasts canvas_cleared. HTTP is a fallback when that
@@ -1158,6 +1165,7 @@ function App(): JSX.Element {
         <ProjectPicker beforeSwitch={() => syncToBackend({ silent: true })} />
         <button className={`btn-secondary icons-toggle ${iconsOpen ? 'on' : ''}`} onClick={() => setIconsOpen(o => !o)}>Icons</button>
         <Notify api={excalidrawAPI as ExcalidrawImperativeAPI | null} flush={() => syncToBackend({ silent: true })} />
+        <Scratch api={excalidrawAPI as ExcalidrawImperativeAPI | null} />
         <div className="controls">
           <div className="status">
             <div className={`status-dot ${isConnected ? 'status-connected' : 'status-disconnected'}`}></div>
