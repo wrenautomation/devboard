@@ -19,9 +19,10 @@ const saved = (() => { try { return Number(fs.readFileSync(lastFile, 'utf8').tri
 let last = args.includes('--all') ? 0 : saved || Date.now()
 
 const show = n => {
-  const what = n.ids.length ? `${n.ids.length} shape(s)` : 'no shapes'
+  const what = n.area ? 'marked area' : n.ids.length ? `${n.ids.length} shape(s)` : 'no shapes'
   const box = n.box ? ` at x${n.box.x} y${n.box.y} ${n.box.w}x${n.box.h}` : ''
-  const look = n.ids.length ? ` Look: draw screenshot --ids ${n.ids.join(',')} --out /tmp/note-${n.id}.png` : ' Look: draw describe'
+  const look = n.area ? ` Look: draw screenshot --area ${n.box.x},${n.box.y},${n.box.w},${n.box.h} --out /tmp/note-${n.id}.png`
+    : n.ids.length ? ` Look: draw screenshot --ids ${n.ids.join(',')} --out /tmp/note-${n.id}.png` : ' Look: draw describe'
   console.log(`[canvas note ${n.id}] project ${n.project}${n.to ? ` to @${n.to}` : ''}, ${what}${box}: "${n.text || '(no text)'}".${look}`)
   last = n.id
   fs.writeFileSync(lastFile, `${last}\n`)

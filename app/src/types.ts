@@ -272,6 +272,7 @@ export interface ExportImageOptions {
   padding?: number;
   elementIds?: string[];
   frameId?: string;
+  area?: { x: number; y: number; w: number; h: number };
   embedFonts?: boolean;
   embedScene?: boolean;
 }

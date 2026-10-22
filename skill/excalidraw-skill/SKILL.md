@@ -29,7 +29,7 @@ Three interfaces drive the same live canvas. Pick the first one that applies:
 - Pair loop: `describe` + `screenshot` → add or tidy → `screenshot` to check. Don't delete or move his strokes unless he asks; `snapshot save` before a big rework.
 - Save finished diagrams with `export --out <repo>/designs/<name>.excalidraw`.
 - Notes from the canvas: William selects shapes, taps **Send to Claude**, and types or speaks a note. To receive notes, start the **Monitor** tool with `draw watch --name <short-session-name>` (timeout_ms 1800000). Re-arm it each time it expires. Pick a name for your task (lowercase, digits, dashes). He can target one session as `@name` or send to all.
-- Each note is one line: `[canvas note <id>] project <p>, N shape(s) at x y wxh: "<text>". Look: <command>`. Run the Look command (`draw screenshot --ids ...` or `draw describe`), read the image, then do what the note asks. The scene is saved before the note goes out. If `project` is not the open project, the note is old: say so.
+- Each note is one line: `[canvas note <id>] project <p>, marked area | N shape(s) at x y wxh: "<text>". Look: <command>`. A marked area is a box William dragged over the canvas. Run the Look command (`draw screenshot --area x,y,w,h`, `--ids ...` or `draw describe`), read the image, then do what the note asks. The scene is saved before the note goes out. If `project` is not the open project, the note is old: say so.
 - A restarted watch with the same name gets the notes it missed. `--all` replays the last 200.
 
 Screenshots and image exports render headless inside the canvas server, so you never need a browser tab to check your own work. Only mermaid conversion and viewport control need an open tab (CLI exits with code 4 when it's missing; ask William to open the iPad page).
@@ -216,7 +216,7 @@ The intermediate waypoint `[50, -40]` lifts the arrow upward. `roundness: {type:
 Pairing `describe` with `screenshot` is what makes this skill powerful.
 
 - **`describe`** (`describe_scene` in MCP) → structured text: element IDs, types, positions, labels, connections. Use it to know *what's on the canvas* before making programmatic updates (find IDs, understand bounding boxes).
-- **`screenshot`** (`get_canvas_screenshot` in MCP) → PNG rendered headless from the canonical canvas state with Excalidraw's own renderer (no browser tab needed, a few ms). Use it for *visual quality verification* — it shows exactly what the diagram looks like, including truncation, overlap, and arrow routing. The CLI prints the saved file path as JSON; read/view that file. `--scale 2` for legibility on dense diagrams, `--ids a,b` or `--frame <id>` to zoom in on a part, `--dark` for dark mode.
+- **`screenshot`** (`get_canvas_screenshot` in MCP) → PNG rendered headless from the canonical canvas state with Excalidraw's own renderer (no browser tab needed, a few ms). Use it for *visual quality verification* — it shows exactly what the diagram looks like, including truncation, overlap, and arrow routing. The CLI prints the saved file path as JSON; read/view that file. `--scale 2` for legibility on dense diagrams, `--ids a,b`, `--frame <id>` or `--area x,y,w,h` (scene box, clipped) to zoom in on a part, `--dark` for dark mode.
 
 **Feedback loop:**
 ```

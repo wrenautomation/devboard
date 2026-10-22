@@ -18,6 +18,8 @@ import {
 export type RenderFormat = 'png' | 'svg';
 export type RendererName = 'auto' | 'node' | 'browser';
 
+export interface Area { x: number; y: number; w: number; h: number }
+
 export interface RenderOptions {
   format: RenderFormat;
   background?: boolean;           // default true
@@ -27,6 +29,7 @@ export interface RenderOptions {
   padding?: number;               // px around the scene, default 10
   elementIds?: string[];          // render only these (plus their bound text)
   frameId?: string;               // render one frame, clipped to it
+  area?: Area;                    // local patch: render this scene box, clipped to it (a canvas note's marked area)
   embedFonts?: boolean;           // SVG only: inline @font-face, default true
   embedScene?: boolean;           // PNG only: include the editable scene, default false
   systemFonts?: boolean;          // PNG only: let resvg use machine fonts; default auto (non-Latin text)
@@ -65,7 +68,7 @@ export function maxDimension(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_MAX_DIMENSION;
 }
 
-export function validateRenderOptions(options: RenderOptions): Required<Omit<RenderOptions, 'elementIds' | 'frameId' | 'systemFonts'>> & Pick<RenderOptions, 'elementIds' | 'frameId' | 'systemFonts'> {
+export function validateRenderOptions(options: RenderOptions): Required<Omit<RenderOptions, 'elementIds' | 'frameId' | 'area' | 'systemFonts'>> & Pick<RenderOptions, 'elementIds' | 'frameId' | 'area' | 'systemFonts'> {
   if (options.format !== 'png' && options.format !== 'svg') {
     throw new RenderError('format must be "png" or "svg"');
   }
@@ -83,6 +86,12 @@ export function validateRenderOptions(options: RenderOptions): Required<Omit<Ren
   if (options.elementIds && options.frameId) {
     throw new RenderError('elementIds and frameId are mutually exclusive');
   }
+  if ([options.elementIds, options.frameId, options.area].filter(Boolean).length > 1) {
+    throw new RenderError('elementIds, frameId and area are mutually exclusive');
+  }
+  if (options.area && !(options.area.w > 0 && options.area.h > 0)) {
+    throw new RenderError('area needs a positive w and h');
+  }
   if (options.elementIds && (!Array.isArray(options.elementIds) || options.elementIds.length === 0)) {
     throw new RenderError('elementIds must be a non-empty array of element ids');
   }
@@ -97,6 +106,7 @@ export function validateRenderOptions(options: RenderOptions): Required<Omit<Ren
     embedScene: options.embedScene ?? false,
     elementIds: options.elementIds,
     frameId: options.frameId,
+    area: options.area,
     systemFonts: options.systemFonts
   };
 }
@@ -125,6 +135,11 @@ export function findFrame(elements: Record<string, any>[], frameId: string): Rec
   return frame;
 }
 
+// A frame that is not in the scene: Excalidraw's frame export then crops to the box and draws no frame.
+function areaFrame({ x, y, w, h }: Area): Record<string, any> {
+  return { id: '__area', type: 'frame', x, y, width: w, height: h, angle: 0, name: null, groupIds: [], frameId: null, isDeleted: false }
+}
+
 function svgDimensions(svg: string): { width: number; height: number } {
   const root = svg.match(/^<svg[^>]*>/)?.[0] ?? '';
   const width = Number(root.match(/\swidth="([\d.]+)"/)?.[1]);
@@ -141,7 +156,7 @@ export async function renderScene(scene: RenderableScene, rawOptions: RenderOpti
 
   const live = await prepareScene(scene.elements.filter(el => el && !el.isDeleted));
   const elements = options.elementIds ? selectElements(live, options.elementIds) : live;
-  const exportingFrame = options.frameId ? findFrame(live, options.frameId) : null;
+  const exportingFrame = options.frameId ? findFrame(live, options.frameId) : options.area ? areaFrame(options.area) : null;
 
   let svg = await renderSvgWithExcalidraw(elements, scene.files ?? {}, {
     background: options.background,

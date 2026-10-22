@@ -13,12 +13,13 @@ export const IMAGE_FLAG_SPEC = {
   padding: { takesValue: true },
   ids: { takesValue: true },
   frame: { takesValue: true },
+  area: { takesValue: true },
   'embed-scene': { takesValue: false },
   'no-embed-fonts': { takesValue: false }
 } as const;
 
 export const IMAGE_FLAG_USAGE =
-  '[--format png|svg] [--no-background] [--dark] [--scale N] [--padding N] [--ids a,b,c] [--frame <id>] [--embed-scene] [--no-embed-fonts]';
+  '[--format png|svg] [--no-background] [--dark] [--scale N] [--padding N] [--ids a,b,c] [--frame <id>] [--area x,y,w,h] [--embed-scene] [--no-embed-fonts]';
 
 type Flags = Record<string, string | boolean | string[] | undefined>;
 
@@ -59,6 +60,12 @@ export function imageOptionsFromFlags(flags: Flags, format: 'png' | 'svg'): Expo
   const frameRaw = scalar(flags.frame);
   const frame = typeof frameRaw === 'string' ? frameRaw : undefined;
   if (ids && frame) throw new CliUsageError('--ids and --frame are mutually exclusive');
+  const areaRaw = scalar(flags.area);
+  const nums = typeof areaRaw === 'string' ? areaRaw.split(',').map(Number) : undefined;
+  if (nums && (nums.length !== 4 || !nums.every(Number.isFinite) || nums[2]! <= 0 || nums[3]! <= 0)) {
+    throw new CliUsageError('--area needs x,y,w,h with a positive w and h');
+  }
+  if (nums && (ids || frame)) throw new CliUsageError('--area, --ids and --frame are mutually exclusive');
   const embedScene = scalar(flags['embed-scene']) === true;
   if (embedScene && format !== 'png') throw new CliUsageError('embedScene is only supported for PNG exports');
 
@@ -72,6 +79,7 @@ export function imageOptionsFromFlags(flags: Flags, format: 'png' | 'svg'): Expo
     ...(numberFlag(flags, 'padding') !== undefined ? { padding: numberFlag(flags, 'padding') } : {}),
     ...(ids ? { elementIds: ids } : {}),
     ...(frame ? { frameId: frame } : {}),
+    ...(nums ? { area: { x: nums[0]!, y: nums[1]!, w: nums[2]!, h: nums[3]! } } : {}),
     ...(flags['no-embed-fonts'] ? { embedFonts: false } : {})
   };
 }

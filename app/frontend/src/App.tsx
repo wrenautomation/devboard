@@ -191,6 +191,7 @@ interface ExportImageOptions {
   padding?: number;
   elementIds?: string[];
   frameId?: string;
+  area?: { x: number; y: number; w: number; h: number };
   embedScene?: boolean;
 }
 
@@ -744,7 +745,9 @@ function App(): JSX.Element {
                 : allElements
               const exportingFrame = opts.frameId
                 ? (allElements.find(el => el.id === opts.frameId && (el.type === 'frame' || el.type === 'magicframe')) as any) ?? null
-                : null
+                : opts.area // Local patch: a marked area crops like a frame that is not in the scene.
+                  ? { id: '__area', type: 'frame', x: opts.area.x, y: opts.area.y, width: opts.area.w, height: opts.area.h, angle: 0, name: null, groupIds: [], frameId: null, isDeleted: false } as any
+                  : null
               if (opts.frameId && !exportingFrame) throw new Error(`Unknown frame id: ${opts.frameId}`)
               let exportElements = embedScene && exportingFrame
                 ? elementsOverlappingBBox({ elements, bounds: exportingFrame, type: 'overlap' })

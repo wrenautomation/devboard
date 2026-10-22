@@ -1046,6 +1046,7 @@ const exportImageSchema = z.object({
   padding: z.number().min(0).optional(),
   elementIds: z.array(z.string()).min(1).optional(),
   frameId: z.string().optional(),
+  area: z.object({ x: z.number(), y: z.number(), w: z.number().positive(), h: z.number().positive() }).optional(),
   embedScene: z.boolean().default(false),
   embedFonts: z.boolean().optional()
 });
@@ -1454,7 +1455,7 @@ app.get('/', (req: Request, res: Response) => {
 // Local patch: notes to Claude Code sessions. The canvas posts a note (text + the selected ids);
 // `draw watch` holds GET /api/events open (Server-Sent Events) and prints one line per note.
 // The last 200 notes stay in notes.jsonl, so a watcher that reconnects gets the ones it missed.
-type Note = { id: number; at: string; project: string; to: string; text: string; ids: string[]; box?: { x: number; y: number; w: number; h: number } };
+type Note = { id: number; at: string; project: string; to: string; text: string; ids: string[]; box?: { x: number; y: number; w: number; h: number }; area?: true };
 const NOTES_FILE = process.env.EXCALIDRAW_NOTES_FILE
   ?? (process.env.EXCALIDRAW_CURRENT_FILE ? path.join(path.dirname(process.env.EXCALIDRAW_CURRENT_FILE), 'notes.jsonl') : undefined);
 const notes: Note[] = (() => {
@@ -1466,11 +1467,13 @@ const forWatcher = (n: Note, name: string) => !n.to || n.to === name;
 app.post('/api/notify', (req: Request, res: Response) => {
   const text = String(req.body?.text ?? '').trim().slice(0, 4000);
   const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String).slice(0, 500) : [];
-  if (!text && !ids.length) return res.status(400).json({ success: false, error: 'note needs text or selected shapes' });
   const b = req.body?.box;
   const box = b && [b.x, b.y, b.w, b.h].every(Number.isFinite) ? { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.w), h: Math.round(b.h) } : undefined;
+  // area: the box is a marked area, not the bounds of the selected shapes.
+  const area = req.body?.area === true && box && box.w > 0 && box.h > 0;
+  if (!text && !ids.length && !area) return res.status(400).json({ success: false, error: 'note needs text, selected shapes or a marked area' });
   const to = PROJECT_NAME.test(String(req.body?.to ?? '')) ? String(req.body.to) : '';
-  const note: Note = { id: Math.max(Date.now(), (notes.at(-1)?.id ?? 0) + 1), at: new Date().toISOString(), project: currentProject(), to, text, ids, ...(box ? { box } : {}) };
+  const note: Note = { id: Math.max(Date.now(), (notes.at(-1)?.id ?? 0) + 1), at: new Date().toISOString(), project: currentProject(), to, text, ids, ...(box ? { box } : {}), ...(area ? { area: true as const } : {}) };
   notes.push(note);
   if (notes.length > 200) notes.splice(0, notes.length - 200);
   if (NOTES_FILE) {
