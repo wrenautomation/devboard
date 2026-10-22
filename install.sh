@@ -4,15 +4,16 @@
 #   install.sh remove   stop them and delete the agents
 # canvas  127.0.0.1:3100  mcp_excalidraw built from source in ./app (8084a1c + local commits: library in IndexedDB, /lib/ URLs allowed, project picker; the npm 2.1.2
 #         release has no disk persistence). State in ./projects/<name>; ./current names the open one
-#         (run-canvas.sh reads it at start; the page dropdown and `draw project` switch in place).
+#         (agent.mjs canvas reads it at start; the page dropdown and `draw project` switch in place).
 #         ./library/wren.excalidrawlib (brand logos + catalog sets, built by library/brands.js + merge.py) is
 #         served at /lib/; import it once per browser with /#addLibrary=<that url>.
 # tunnel  draw.wrenautomation.com → canvas, Cloudflare tunnel "wren-canvas", token in tunnel.token.
 #         Cloudflare Access app "Excalidraw canvas" (team little-hill-c547) lets in jinwilliam.jin@gmail.com
 #         by emailed code; the tunnel route requires its Access JWT (originRequest.access), so nothing else gets through.
-# backup  nightly 03:30: backup-boards.sh commits ./projects and pushes (private repo wrenautomation/devboard).
+# backup  nightly 03:30: agent.mjs backup commits ./projects and pushes (private repo wrenautomation/devboard).
 # Repo layout: app/ = the mcp_excalidraw fork (history kept; upstream remote = yctimlin), bin/draw (linked to
 #         ~/.local/bin/draw and devboard), skill/excalidraw-skill (linked to ~/.claude/skills), library/, projects/.
+# All three run `node agent.mjs <mode>`: launchd's bash may not read ~/Documents, node may.
 # Logs: ~/Library/Logs/excalidraw-canvas*.log, devboard-backup.log
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd -P)"
@@ -56,11 +57,11 @@ if [ "$MODE" != remove ]; then
 fi
 # draw.wrenautomation.com/* has a no-Worker route (wren deploy/scripts/custom-domains.sh): without it
 # wren-portal's `*/*` route serves its own /assets/* and the page is white.
+P="<key>PATH</key><string>$(dirname "$NODE"):/opt/homebrew/bin:/usr/bin:/bin</string>"
 agent excalidraw-canvas excalidraw-canvas \
-  "<key>HOST</key><string>127.0.0.1</string><key>PORT</key><string>3100</string><key>NODE</key><string>$NODE</string>" \
-  "$DIR/run-canvas.sh"
-agent excalidraw-canvas-tunnel excalidraw-canvas-tunnel "" \
-  "$(command -v cloudflared)" tunnel --no-autoupdate run --token-file "$DIR/tunnel.token"
+  "$P<key>HOST</key><string>127.0.0.1</string><key>PORT</key><string>3100</string>" "$NODE" "$DIR/agent.mjs" canvas
+agent excalidraw-canvas-tunnel excalidraw-canvas-tunnel \
+  "$P<key>CLOUDFLARED</key><string>$(command -v cloudflared)</string>" "$NODE" "$DIR/agent.mjs" tunnel
 SCHEDULE="<key>StartCalendarInterval</key><dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>30</integer></dict>" \
-  agent devboard-backup devboard-backup "<key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin</string>" "$DIR/backup-boards.sh"
+  agent devboard-backup devboard-backup "$P" "$NODE" "$DIR/agent.mjs" backup
 echo "${MODE:-installed}"
