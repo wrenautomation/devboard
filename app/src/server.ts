@@ -1549,6 +1549,26 @@ app.get('/api/events', (req: Request, res: Response) => {
 app.get('/api/watchers', (_req: Request, res: Response) => {
   res.json({ success: true, watchers: [...new Set(watchers.values())].sort() });
 });
+// Live Claude Code sessions on this Mac, for the canvas "To" picker. Claude Code writes one file per running
+// session (name, folder, idle/busy); a session listens as `cc-<first 8 of its id>` (the SessionStart hook in
+// install.sh starts `draw watch --once` under that name). Watchers that are no session are listed too.
+const SESSIONS_DIR = process.env.CLAUDE_SESSIONS_DIR ?? path.join(process.env.HOME ?? '', '.claude', 'sessions');
+const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM'; } };
+app.get('/api/sessions', (_req: Request, res: Response) => {
+  const listening = new Set(watchers.values());
+  let files: string[] = [];
+  try { files = projectFs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json')); } catch { /* no Claude Code here */ }
+  const sessions = files.flatMap(f => {
+    try {
+      const d = JSON.parse(projectFs.readFileSync(path.join(SESSIONS_DIR, f), 'utf8'));
+      if (!Number.isInteger(d.pid) || !alive(d.pid) || typeof d.sessionId !== 'string') return [];
+      const watch = `cc-${d.sessionId.replace(/[^a-f0-9]/g, '').slice(0, 8)}`;
+      return [{ watch, name: String(d.name || watch), folder: path.basename(String(d.cwd ?? '')), status: d.status === 'busy' ? 'busy' : 'idle', listening: listening.has(watch), updated: Number(d.updatedAt) || 0 }];
+    } catch { return []; }
+  }).sort((a, b) => Number(b.listening) - Number(a.listening) || b.updated - a.updated);
+  const known = new Set(sessions.map(x => x.watch));
+  res.json({ success: true, sessions, others: [...listening].filter(n => !known.has(n)).sort() });
+});
 
 // Local patch: projects (boards) in folders. agent.mjs sets EXCALIDRAW_PROJECTS_DIR and EXCALIDRAW_CURRENT_FILE
 // (the open board's path). A board is a folder that holds canvas-state-v1.json; any other folder is a folder.

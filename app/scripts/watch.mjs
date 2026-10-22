@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-// Local patch: `draw watch [--name x] [--all]`. Holds the canvas event stream open and prints one
+// Local patch: `draw watch [--name x] [--all] [--once]`. Holds the canvas event stream open and prints one
 // line per note sent from the canvas. Run it with Claude Code's Monitor tool: each line wakes the session.
+// --once exits after the first note (and any sent within 300ms): for a background Bash task, which wakes
+// the session when it exits and costs nothing while it waits. The session starts it again after each note.
 // It reconnects by itself and keeps the last note id in watch/<name>.last, so a restart gets missed notes.
 import fs from 'node:fs'
 import path from 'node:path'
@@ -16,6 +18,16 @@ const lastFile = path.join(dir, `${name}.last`)
 fs.mkdirSync(dir, { recursive: true })
 // First run starts from now; --all replays the kept history.
 const saved = (() => { try { return Number(fs.readFileSync(lastFile, 'utf8').trim()) } catch { return NaN } })()
+const once = args.includes('--once')
+// One --once watcher per name: a session that starts it twice (resume, compact) gets one wake per note.
+const pidFile = path.join(dir, `${name}.pid`)
+if (once) {
+  const other = (() => { try { return Number(fs.readFileSync(pidFile, 'utf8')) } catch { return 0 } })()
+  const alive = (() => { try { return other > 0 && other !== process.pid && (process.kill(other, 0), true) } catch { return false } })()
+  if (alive) { console.log(`[canvas watch] already listening as ${name}`); process.exit(0) }
+  fs.writeFileSync(pidFile, String(process.pid))
+  process.on('exit', () => { try { if (Number(fs.readFileSync(pidFile, 'utf8')) === process.pid) fs.rmSync(pidFile) } catch {} })
+}
 let last = args.includes('--all') ? 0 : saved || Date.now()
 
 const show = n => {
@@ -26,6 +38,7 @@ const show = n => {
   console.log(`[canvas note ${n.id}] project ${n.project}${n.to ? ` to @${n.to}` : ''}, ${what}${box}: "${n.text || '(no text)'}".${look}`)
   last = n.id
   fs.writeFileSync(lastFile, `${last}\n`)
+  if (once) setTimeout(() => process.exit(0), 300)
 }
 
 let down = false
@@ -33,7 +46,7 @@ for (let wait = 1000; ; wait = Math.min(wait * 2, 30000)) {
   try {
     const res = await fetch(`${url}/api/events?name=${name}`, { headers: { 'last-event-id': String(last) } })
     if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)
-    if (down) console.log(`[canvas watch] connected again as ${name}`)
+    if (down && !once) console.log(`[canvas watch] connected again as ${name}`)
     else console.error(`[canvas watch] watching as ${name}`)
     down = false; wait = 500
     let buf = ''
@@ -48,7 +61,7 @@ for (let wait = 1000; ; wait = Math.min(wait * 2, 30000)) {
     }
     throw new Error('stream ended')
   } catch (e) {
-    if (!down) console.log(`[canvas watch] lost the canvas (${e.message}); trying again`)
+    if (!down && !once) console.log(`[canvas watch] lost the canvas (${e.message}); trying again`)
     down = true
   }
   await new Promise(r => setTimeout(r, wait))

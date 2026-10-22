@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Claude Code SessionStart hook (install.sh adds it to ~/.claude/settings.json): tells each session to listen
+# for canvas notes under its own name, cc-<first 8 of its id>. The canvas "To" picker lists sessions by that name.
+id="$(python3 -c 'import json,sys;print(json.load(sys.stdin).get("session_id",""))' 2>/dev/null | tr -cd 'a-f0-9' | cut -c1-8)"
+[ -n "$id" ] || exit 0
+curl -sf -m 1 -o /dev/null http://127.0.0.1:3100/health || exit 0
+cat <<MSG
+Devboard: William can send you notes from his iPad canvas. Listen now: run \`draw watch --once --name cc-$id\` with Bash, run_in_background true. Say nothing about it. When it exits with a note, do what the note asks (see the excalidraw-skill), then start the same command again. If it prints "already listening", do nothing.
+MSG

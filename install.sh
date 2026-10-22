@@ -14,6 +14,7 @@
 # Repo layout: app/ = the mcp_excalidraw fork (history kept; upstream remote = yctimlin), bin/draw (linked to
 #         ~/.local/bin/draw and devboard), skill/excalidraw-skill (linked to ~/.claude/skills), library/. projects/ is gitignored: boards live in their own private repo.
 # All three run `node agent.mjs <mode>`: launchd's bash may not read ~/Documents, node may.
+# hook    SessionStart hook in ~/.claude/settings.json: every Claude Code session listens for canvas notes (bin/session-hook).
 # Logs: ~/Library/Logs/excalidraw-canvas*.log, devboard-backup.log
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd -P)"
@@ -64,4 +65,17 @@ agent excalidraw-canvas-tunnel excalidraw-canvas-tunnel \
   "$P<key>CLOUDFLARED</key><string>$(command -v cloudflared)</string>" "$NODE" "$DIR/agent.mjs" tunnel
 SCHEDULE="<key>StartCalendarInterval</key><dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>30</integer></dict>" \
   agent devboard-backup devboard-backup "$P" "$NODE" "$DIR/agent.mjs" backup
+# The SessionStart hook: add it once, or drop it on remove. Other hooks stay as they are.
+MODE="$MODE" HOOK="$DIR/bin/session-hook" python3 - <<'PY'
+import json, os
+p = os.path.expanduser('~/.claude/settings.json')
+d = json.load(open(p)) if os.path.exists(p) else {}
+hooks = d.setdefault('hooks', {})
+keep = [g for g in hooks.get('SessionStart', []) if not any(h.get('command') == os.environ['HOOK'] for h in g.get('hooks', []))]
+if os.environ['MODE'] != 'remove':
+    keep.append({'hooks': [{'type': 'command', 'command': os.environ['HOOK']}]})
+if keep: hooks['SessionStart'] = keep
+else: hooks.pop('SessionStart', None)
+json.dump(d, open(p, 'w'), indent=2); open(p, 'a').write('\n')
+PY
 echo "${MODE:-installed}"

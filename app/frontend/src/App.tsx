@@ -1180,7 +1180,7 @@ function App(): JSX.Element {
                 theme,
                 // Whiteboard-marker defaults: bold black line, big hand-lettered text.
                 currentItemStrokeColor: '#1e1e1e',
-                currentItemStrokeWidth: 2,
+                currentItemStrokeWidth: 0.5,
                 currentItemFontSize: 28,
                 currentItemFontFamily: 5,
               }

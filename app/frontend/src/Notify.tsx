@@ -7,11 +7,14 @@ import { Send } from 'lucide-react'
 import { BoxDraw, boxStyle, toScreen, type Box } from './BoxDraw'
 import { appendSaid, canDictate, useDictation } from './speech'
 
+type Session = { watch: string; name: string; folder: string; status: 'idle' | 'busy'; listening: boolean }
+
 export function Notify({ api, flush }: { api: ExcalidrawImperativeAPI | null; flush: () => Promise<void> }) {
   const [open, setOpen] = useState(false)
   const [text, setText] = useState('')
   const [to, setTo] = useState('')
-  const [watchers, setWatchers] = useState<string[]>([])
+  const [sessions, setSessions] = useState<Session[]>([])
+  const [others, setOthers] = useState<string[]>([])
   const [picked, setPicked] = useState(0)
   const [status, setStatus] = useState('')
   const [area, setArea] = useState<Box | null>(null) // scene coords
@@ -26,11 +29,14 @@ export function Notify({ api, flush }: { api: ExcalidrawImperativeAPI | null; fl
     return api.onChange(read)
   }, [api])
 
-  // Who is watching now, each time the panel opens.
+  // Live sessions and who listens, each time the panel opens.
   useEffect(() => {
     if (!open) return
-    fetch('/api/watchers').then(r => r.json()).then(d => setWatchers(d.watchers ?? [])).catch(() => setWatchers([]))
+    fetch('/api/sessions').then(r => r.json())
+      .then(d => { setSessions(d.sessions ?? []); setOthers(d.others ?? []) })
+      .catch(() => { setSessions([]); setOthers([]) })
   }, [open])
+  const listening = sessions.filter(x => x.listening).length + others.length
 
   const send = async () => {
     if (!api) return
@@ -90,8 +96,13 @@ export function Notify({ api, flush }: { api: ExcalidrawImperativeAPI | null; fl
           </div>
           <div className="nt-row">
             <select value={to} onChange={e => setTo(e.target.value)} aria-label="Send to">
-              <option value="">All sessions ({watchers.length})</option>
-              {watchers.map(w => <option key={w} value={w}>@{w}</option>)}
+              <option value="">All listening ({listening})</option>
+              {sessions.map(x => (
+                <option key={x.watch} value={x.watch} disabled={!x.listening}>
+                  {x.name} · {x.folder}{x.status === 'busy' ? ' · busy' : ''}{x.listening ? '' : ' · not listening'}
+                </option>
+              ))}
+              {others.map(w => <option key={w} value={w}>@{w}</option>)}
             </select>
             <button className="nt-send" onClick={() => void send()}>Send</button>
           </div>

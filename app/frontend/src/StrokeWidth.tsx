@@ -9,7 +9,7 @@ const MIN = 0.25, MAX = 10
 
 export function StrokeWidth({ api }: { api: ExcalidrawImperativeAPI | null }) {
   const [open, setOpen] = useState(false)
-  const [width, setWidth] = useState(2)
+  const [width, setWidth] = useState(0.5)
 
   // Follow the selection, or the pen default when nothing is selected.
   useEffect(() => {
