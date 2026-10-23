@@ -94,18 +94,23 @@ export function Notify({ api, flush }: { api: ExcalidrawImperativeAPI | null; fl
               </button>
             )}
           </div>
-          <div className="nt-row">
-            <select value={to} onChange={e => setTo(e.target.value)} aria-label="Send to">
-              <option value="">All listening ({listening})</option>
-              {sessions.map(x => (
-                <option key={x.watch} value={x.watch} disabled={!x.listening}>
-                  {x.name} · {x.folder}{x.status === 'busy' ? ' · busy' : ''}{x.listening ? '' : ' · not listening'}
-                </option>
-              ))}
-              {others.map(w => <option key={w} value={w}>@{w}</option>)}
-            </select>
-            <button className="nt-send" onClick={() => void send()}>Send</button>
+          <div className="nt-to" role="radiogroup" aria-label="Send to">
+            <button type="button" role="radio" aria-checked={to === ''} className={to === '' ? 'on' : ''} onClick={() => setTo('')}>
+              <b>All listening</b><span>{listening} session{listening === 1 ? '' : 's'}</span>
+            </button>
+            {sessions.map(x => (
+              <button key={x.watch} type="button" role="radio" aria-checked={to === x.watch} className={to === x.watch ? 'on' : ''}
+                disabled={!x.listening} onClick={() => setTo(x.watch)}>
+                <b>{x.name}</b><span>{x.folder}{x.status === 'busy' ? ' · busy' : ''}{x.listening ? '' : ' · not listening'}</span>
+              </button>
+            ))}
+            {others.map(w => (
+              <button key={w} type="button" role="radio" aria-checked={to === w} className={to === w ? 'on' : ''} onClick={() => setTo(w)}>
+                <b>@{w}</b><span>watcher</span>
+              </button>
+            ))}
           </div>
+          <button className="nt-send" onClick={() => void send()}>Send</button>
           {status && <div className="nt-status" role="status">{status}</div>}
         </div>
       )}

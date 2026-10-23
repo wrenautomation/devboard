@@ -4,9 +4,11 @@
 // --once exits after the first note (and any sent within 300ms): for a background Bash task, which wakes
 // the session when it exits and costs nothing while it waits. The session starts it again after each note.
 // It reconnects by itself and keeps the last note id in watch/<name>.last, so a restart gets missed notes.
+// It exits when its shell ends, and a new --once start replaces a watcher whose shell is gone.
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { execFileSync } from 'node:child_process'
 
 const args = process.argv.slice(2)
 const flag = k => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : undefined }
@@ -24,10 +26,16 @@ const pidFile = path.join(dir, `${name}.pid`)
 if (once) {
   const other = (() => { try { return Number(fs.readFileSync(pidFile, 'utf8')) } catch { return 0 } })()
   const alive = (() => { try { return other > 0 && other !== process.pid && (process.kill(other, 0), true) } catch { return false } })()
-  if (alive) { console.log(`[canvas watch] already listening as ${name}`); process.exit(0) }
+  // A watcher whose shell died (ppid 1) still holds the stream but wakes no session: stop it and take over.
+  const orphan = alive && (() => { try { return Number(execFileSync('ps', ['-o', 'ppid=', '-p', String(other)], { encoding: 'utf8' })) <= 1 } catch { return true } })()
+  if (orphan) { try { process.kill(other) } catch {} }
+  else if (alive) { console.log(`[canvas watch] already listening as ${name}`); process.exit(0) }
   fs.writeFileSync(pidFile, String(process.pid))
   process.on('exit', () => { try { if (Number(fs.readFileSync(pidFile, 'utf8')) === process.pid) fs.rmSync(pidFile) } catch {} })
 }
+// Stop when the shell that started this ends; its output reaches no one after that.
+const parent = process.ppid
+setInterval(() => { if (process.ppid !== parent) process.exit(0) }, 2000).unref()
 let last = args.includes('--all') ? 0 : saved || Date.now()
 
 const show = n => {
