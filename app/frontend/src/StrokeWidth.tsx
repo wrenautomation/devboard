@@ -30,6 +30,7 @@ export function StrokeWidth({ api }: { api: ExcalidrawImperativeAPI | null }) {
       const el = ids.length ? api.getSceneElements().find(e => e.id === ids[0]) : undefined
       setWidth(el ? el.strokeWidth : s.currentItemStrokeWidth)
       setColor(el ? el.strokeColor : s.currentItemStrokeColor)
+      document.documentElement.dataset.styleSel = ids.length ? '1' : '0'
       setShown(!s.viewModeEnabled && (ids.length > 0 || !NOTHING_TO_STYLE.has(s.activeTool.type)))
     }
     read()

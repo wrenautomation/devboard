@@ -152,6 +152,13 @@ button:disabled, .nt-send:disabled { cursor: default; opacity: .45; transform: n
 .excalidraw .selected-shape-actions fieldset { margin: 0; }
 .excalidraw .selected-shape-actions :is(legend, h3, .control-label) { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); margin: 0 0 6px; }
 .excalidraw .selected-shape-actions fieldset:has(.sw-slot) > .buttonList { display: none; }
+/* iPad: no keyboard hints. Layers and Actions only act on a selection; the X beside it deletes. */
+.excalidraw .HintViewer { display: none; }
+:root[data-style-sel="0"] .excalidraw .selected-shape-actions fieldset:has(.zIndexButton),
+:root[data-style-sel="0"] .excalidraw .selected-shape-actions fieldset:has(button[title^="Duplicate"]) { display: none; }
+.excalidraw .selected-shape-actions button[title="Delete"],
+.excalidraw .selected-shape-actions .range-wrapper :is(.zero-label, .value-bubble) { display: none; }
+.excalidraw .selected-shape-actions .range-wrapper { padding-bottom: 0; }
 .sw-presets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
 .sw-presets button { display: flex; align-items: center; justify-content: center; height: 36px; border: 0; border-radius: var(--leaf-c); background: var(--fill); color: var(--ink); }
 .sw-presets button.on { background: var(--tint); color: var(--accent); box-shadow: inset 0 0 0 1.5px var(--accent); }
