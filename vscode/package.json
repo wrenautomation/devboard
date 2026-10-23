@@ -1,0 +1,12 @@
+{
+  "name": "devboard-terminal",
+  "displayName": "Devboard terminal",
+  "description": "Lets the Devboard canvas press Enter in the terminal that runs a Claude Code session.",
+  "publisher": "wrenautomation",
+  "version": "0.1.0",
+  "license": "SEE LICENSE IN ../LICENSE.md",
+  "repository": "https://github.com/wrenautomation/devboard",
+  "engines": { "vscode": "^1.80.0" },
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished"]
+}

@@ -3,6 +3,7 @@ import cors from 'cors';
 import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import net from 'net';
+import { execFileSync } from 'child_process';
 import path from 'path';
 import * as projectFs from 'fs';
 import { fileURLToPath } from 'url';
@@ -1574,7 +1575,7 @@ app.get('/', (req: Request, res: Response) => {
 // Local patch: notes to Claude Code sessions. The canvas posts a note (text + the selected ids);
 // `draw watch` holds GET /api/events open (Server-Sent Events) and prints one line per note.
 // The last 200 notes stay in notes.jsonl, so a watcher that reconnects gets the ones it missed.
-type Note = { id: number; at: string; project: string; to: string; text: string; ids: string[]; box?: { x: number; y: number; w: number; h: number }; area?: true };
+type Note = { id: number; at: string; project: string; to: string; text: string; ids: string[]; box?: { x: number; y: number; w: number; h: number }; area?: true; enter?: true };
 const NOTES_FILE = process.env.EXCALIDRAW_NOTES_FILE
   ?? (process.env.EXCALIDRAW_CURRENT_FILE ? path.join(path.dirname(process.env.EXCALIDRAW_CURRENT_FILE), 'notes.jsonl') : undefined);
 const notes: Note[] = (() => {
@@ -1593,7 +1594,9 @@ app.post('/api/notify', (req: Request, res: Response) => {
   const area = req.body?.area === true && box && box.w > 0 && box.h > 0;
   if (!text && !ids.length && !area) return res.status(400).json({ success: false, error: 'note needs text, selected shapes or a marked area' });
   const to = WATCHER_NAME.test(String(req.body?.to ?? '')) ? String(req.body.to) : '';
-  const note: Note = { id: Math.max(Date.now(), (notes.at(-1)?.id ?? 0) + 1), at: new Date().toISOString(), project: currentProject(), to, text, ids, ...(box ? { box } : {}), ...(area ? { area: true as const } : {}) };
+  // enter: also press Enter in the terminal of that one session, so a message typed there goes in too.
+  const shell = req.body?.enter === true && to ? liveSessions().find(x => x.watch === to)?.shell : undefined;
+  const note: Note = { id: Math.max(Date.now(), (notes.at(-1)?.id ?? 0) + 1), at: new Date().toISOString(), project: currentProject(), to, text, ids, ...(box ? { box } : {}), ...(area ? { area: true as const } : {}), ...(shell ? { enter: true as const } : {}) };
   notes.push(note);
   if (notes.length > 200) notes.splice(0, notes.length - 200);
   if (NOTES_FILE) {
@@ -1601,8 +1604,9 @@ app.post('/api/notify', (req: Request, res: Response) => {
   }
   let reached = 0;
   watchers.forEach((name, w) => { if (forWatcher(note, name)) { sendNote(w, note); reached++; } });
-  logger.info(`Note ${note.id} to ${to || 'all'}: ${reached} watcher(s)`);
-  res.json({ success: true, id: note.id, reached });
+  if (shell) terminals.get(shell)?.write(`data: ${JSON.stringify({ pid: shell })}\n\n`);
+  logger.info(`Note ${note.id} to ${to || 'all'}: ${reached} watcher(s)${shell ? `, Enter in shell ${shell}` : ''}`);
+  res.json({ success: true, id: note.id, reached, entered: !!shell });
 });
 app.get('/api/events', (req: Request, res: Response) => {
   const name = WATCHER_NAME.test(String(req.query.name ?? '')) ? String(req.query.name) : 'session';
@@ -1621,22 +1625,49 @@ app.get('/api/watchers', (_req: Request, res: Response) => {
 // Live Claude Code sessions on this Mac, for the canvas "To" picker. Claude Code writes one file per running
 // session (name, folder, idle/busy); a session listens as `cc-<first 8 of its id>` (the SessionStart hook in
 // install.sh starts `draw watch --once` under that name). Watchers that are no session are listed too.
+// terminal: the session runs in a VS Code terminal the extension reported, so a note can press Enter there.
 const SESSIONS_DIR = process.env.CLAUDE_SESSIONS_DIR ?? path.join(process.env.HOME ?? '', '.claude', 'sessions');
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM'; } };
-app.get('/api/sessions', (_req: Request, res: Response) => {
+// The devboard VS Code extension (../vscode) holds this open per window with the shell pids of its terminals.
+const terminals = new Map<number, Response>();
+app.get('/api/terminals', (req: Request, res: Response) => {
+  const pids = String(req.query.pids ?? '').split(',').map(Number).filter(n => Number.isInteger(n) && n > 1);
+  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+  res.write(': hello\n\n');
+  pids.forEach(p => terminals.set(p, res));
+  const beat = setInterval(() => res.write(': beat\n\n'), 25000);
+  req.on('close', () => { clearInterval(beat); pids.forEach(p => { if (terminals.get(p) === res) terminals.delete(p); }); });
+});
+// The VS Code terminal shell a process runs under: the nearest parent the extension listed.
+const parentPids = (): Map<number, number> => {
+  if (!terminals.size) return new Map();
+  try {
+    return new Map(execFileSync('ps', ['-axo', 'pid=,ppid='], { encoding: 'utf8' }).trim().split('\n')
+      .map(l => l.trim().split(/\s+/).map(Number) as [number, number]));
+  } catch { return new Map(); }
+};
+const shellOf = (pid: number, parents: Map<number, number>): number | undefined => {
+  for (let p = parents.get(pid), i = 0; p && p > 1 && i < 6; p = parents.get(p), i++) if (terminals.has(p)) return p;
+  return undefined;
+};
+const liveSessions = () => {
+  const parents = parentPids();
   const listening = new Set(watchers.values());
   let files: string[] = [];
   try { files = projectFs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json')); } catch { /* no Claude Code here */ }
-  const sessions = files.flatMap(f => {
+  return files.flatMap(f => {
     try {
       const d = JSON.parse(projectFs.readFileSync(path.join(SESSIONS_DIR, f), 'utf8'));
       if (!Number.isInteger(d.pid) || !alive(d.pid) || typeof d.sessionId !== 'string') return [];
       const watch = `cc-${d.sessionId.replace(/[^a-f0-9]/g, '').slice(0, 8)}`;
-      return [{ watch, name: String(d.name || watch), folder: path.basename(String(d.cwd ?? '')), status: d.status === 'busy' ? 'busy' : 'idle', listening: listening.has(watch), updated: Number(d.updatedAt) || 0 }];
+      return [{ watch, name: String(d.name || watch), folder: path.basename(String(d.cwd ?? '')), status: d.status === 'busy' ? 'busy' : 'idle', listening: listening.has(watch), updated: Number(d.updatedAt) || 0, shell: shellOf(d.pid, parents) }];
     } catch { return []; }
   }).sort((a, b) => Number(b.listening) - Number(a.listening) || b.updated - a.updated);
+};
+app.get('/api/sessions', (_req: Request, res: Response) => {
+  const sessions = liveSessions().map(({ shell, ...x }) => ({ ...x, terminal: !!shell }));
   const known = new Set(sessions.map(x => x.watch));
-  res.json({ success: true, sessions, others: [...listening].filter(n => !known.has(n)).sort() });
+  res.json({ success: true, sessions, others: [...new Set(watchers.values())].filter(n => !known.has(n)).sort() });
 });
 
 // Local patch: projects (boards) in folders. agent.mjs sets EXCALIDRAW_PROJECTS_DIR and EXCALIDRAW_CURRENT_FILE

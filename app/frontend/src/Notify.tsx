@@ -7,7 +7,10 @@ import { Send } from 'lucide-react'
 import { BoxDraw, boxStyle, toScreen, type Box } from './BoxDraw'
 import { appendSaid, canDictate, useDictation } from './speech'
 
-type Session = { watch: string; name: string; folder: string; status: 'idle' | 'busy'; listening: boolean }
+type Session = { watch: string; name: string; folder: string; status: 'idle' | 'busy'; listening: boolean; terminal: boolean }
+
+const ENTER_KEY = 'canvas-note-enter'
+const rememberedEnter = () => { try { return window.localStorage?.getItem(ENTER_KEY) !== '0' } catch { return true } }
 
 export function Notify({ api, flush }: { api: ExcalidrawImperativeAPI | null; flush: () => Promise<void> }) {
   const [open, setOpen] = useState(false)
@@ -17,6 +20,7 @@ export function Notify({ api, flush }: { api: ExcalidrawImperativeAPI | null; fl
   const [others, setOthers] = useState<string[]>([])
   const [picked, setPicked] = useState(0)
   const [status, setStatus] = useState('')
+  const [enter, setEnter] = useState(rememberedEnter)
   const [area, setArea] = useState<Box | null>(null) // scene coords
   const [marking, setMarking] = useState(false)
   const [, setView] = useState(0)
@@ -37,6 +41,12 @@ export function Notify({ api, flush }: { api: ExcalidrawImperativeAPI | null; fl
       .catch(() => { setSessions([]); setOthers([]) })
   }, [open])
   const listening = sessions.filter(x => x.listening).length + others.length
+  // Enter on the Mac: only for one picked session that runs in a VS Code terminal.
+  const canEnter = !!sessions.find(x => x.watch === to)?.terminal
+  const pickEnter = (on: boolean) => {
+    setEnter(on)
+    try { window.localStorage?.setItem(ENTER_KEY, on ? '1' : '0') } catch { /* private mode */ }
+  }
 
   const send = async () => {
     if (!api) return
@@ -54,13 +64,13 @@ export function Notify({ api, flush }: { api: ExcalidrawImperativeAPI | null; fl
       await flush() // Claude reads the saved scene, so save first.
       const r = await fetch('/api/notify', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text, ids, box, to, area: !!area }),
+        body: JSON.stringify({ text, ids, box, to, area: !!area, enter: canEnter && enter }),
       })
       const d = await r.json()
       if (!r.ok) throw new Error(d.error)
       setText('')
       setArea(null)
-      setStatus(d.reached ? `Sent to ${d.reached} session${d.reached > 1 ? 's' : ''}` : 'Kept. No session is watching now')
+      setStatus((d.reached ? `Sent to ${d.reached} session${d.reached > 1 ? 's' : ''}` : 'Kept. No session is watching now') + (d.entered ? '. Enter pressed on the Mac' : ''))
     } catch (e) {
       setStatus(`Not sent: ${(e as Error).message}`)
     }
@@ -101,7 +111,7 @@ export function Notify({ api, flush }: { api: ExcalidrawImperativeAPI | null; fl
             {sessions.map(x => (
               <button key={x.watch} type="button" role="radio" aria-checked={to === x.watch} className={to === x.watch ? 'on' : ''}
                 disabled={!x.listening} onClick={() => setTo(x.watch)}>
-                <b>{x.name}</b><span>{x.folder}{x.status === 'busy' ? ' · busy' : ''}{x.listening ? '' : ' · not listening'}</span>
+                <b>{x.name}</b><span>{x.folder}{x.status === 'busy' ? ' · busy' : ''}{x.terminal ? ' · VS Code' : ''}{x.listening ? '' : ' · not listening'}</span>
               </button>
             ))}
             {others.map(w => (
@@ -110,6 +120,12 @@ export function Notify({ api, flush }: { api: ExcalidrawImperativeAPI | null; fl
               </button>
             ))}
           </div>
+          {canEnter && (
+            <label className="nt-enter">
+              <input type="checkbox" checked={enter} onChange={e => pickEnter(e.target.checked)} />
+              <span>Also send what I typed in this session on the Mac</span>
+            </label>
+          )}
           <button className="nt-send" onClick={() => void send()}>Send</button>
           {status && <div className="nt-status" role="status">{status}</div>}
         </div>

@@ -15,6 +15,7 @@
 #         ~/.local/bin/draw and devboard), skill/excalidraw-skill (linked to ~/.claude/skills), library/. projects/ is gitignored: boards live in their own private repo.
 # All three run `node agent.mjs <mode>`: launchd's bash may not read ~/Documents, node may.
 # hook    SessionStart hook in ~/.claude/settings.json: every Claude Code session listens for canvas notes (bin/session-hook).
+# vscode  the devboard-terminal extension (./vscode): a note can press Enter in the VS Code terminal of its session.
 # Logs: ~/Library/Logs/excalidraw-canvas*.log, devboard-backup.log
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd -P)"
@@ -78,4 +79,11 @@ if keep: hooks['SessionStart'] = keep
 else: hooks.pop('SessionStart', None)
 json.dump(d, open(p, 'w'), indent=2); open(p, 'a').write('\n')
 PY
+if command -v code >/dev/null; then
+  if [ "$MODE" = remove ]; then code --uninstall-extension wrenautomation.devboard-terminal >/dev/null 2>&1 || true
+  else
+    VSIX="${TMPDIR:-/tmp}/devboard-terminal.vsix"
+    (cd "$DIR/vscode" && npx -y @vscode/vsce@3.9.2 package --no-dependencies --skip-license -o "$VSIX" >/dev/null) && code --install-extension "$VSIX" --force >/dev/null
+  fi
+fi
 echo "${MODE:-installed}"
