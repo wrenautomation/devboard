@@ -162,8 +162,20 @@ function prepareFileWrites(fileList: unknown[]): ExcalidrawFile[] {
 }
 
 // WebSocket connection handling
+// Ping every 25s. A link with no traffic through the tunnel stays open, and a client with no pong is dropped.
+const ponged = new WeakMap<WebSocket, boolean>();
+setInterval(() => {
+  for (const ws of wss.clients) {
+    if (ponged.get(ws) === false) { ws.terminate(); continue; }
+    ponged.set(ws, false);
+    ws.ping();
+  }
+}, 25_000).unref();
+
 wss.on('connection', (ws: WebSocket) => {
   clients.add(ws);
+  ponged.set(ws, true);
+  ws.on('pong', () => ponged.set(ws, true));
   logger.info('New WebSocket connection established');
 
   // Send current elements to new client

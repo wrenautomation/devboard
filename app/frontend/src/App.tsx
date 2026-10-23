@@ -209,6 +209,15 @@ function App(): JSX.Element {
     const api = excalidrawAPIRef.current, project = sceneProjectRef.current
     if (api && project) await postThumb(api, project).catch(() => {})
   }
+  // The thumbnail renders the whole board on the main thread (~0.2s on 400 strokes): wait until the pen is up.
+  const penDownRef = useRef(false)
+  const thumbSoon = (): void => { setTimeout(() => (penDownRef.current ? thumbSoon() : void saveThumb()), 1500) }
+  useEffect(() => {
+    const up = () => { penDownRef.current = false }
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+    return () => { window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up) }
+  }, [])
   const syncedVersionRef = useRef<number>(0)
   const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const loadedOnceRef = useRef<boolean>(false)
@@ -223,6 +232,7 @@ function App(): JSX.Element {
   }, [])
   const websocketRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reconnectTriesRef = useRef(0)
 
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window === 'undefined') return 'light'
@@ -251,6 +261,10 @@ function App(): JSX.Element {
     }
   }
   const [sceneLoadStatus, setSceneLoadStatus] = useState<SceneLoadStatus>('loading')
+  // A full scene of the open board is on screen. From then on the pen stays live through reconnects and
+  // reloads: edits wait as a draft and push when sync opens again (reconcileUnsaved). Only the first
+  // scene of a board blocks input.
+  const [sceneShown, setSceneShown] = useState(false)
   const sceneLoadStatusRef = useRef<SceneLoadStatus>('loading')
   const sceneGenerationRef = useRef(0)
 
@@ -340,6 +354,8 @@ function App(): JSX.Element {
   ): Promise<void> => {
     const draft = await loadDraftOnce()
     if (generation !== sceneGenerationRef.current) return
+    // The pen stays live while a scene loads: a stroke drawn during the load wins over the server scene.
+    if (await reconcileUnsaved(generation)) return
     if (!draft) { applyServerScene(incoming, generation, files); return }
     draftLoadRef.current = Promise.resolve(undefined)
     applyServerScene(draft.elements as Partial<ExcalidrawElement>[], generation, files)
@@ -397,6 +413,7 @@ function App(): JSX.Element {
     }
     sceneLoadStatusRef.current = 'ready'
     setSceneLoadStatus('ready')
+    setSceneShown(true)
     loadedOnceRef.current = true
   }
 
@@ -477,7 +494,6 @@ function App(): JSX.Element {
       }
       await preloadCanvasFonts()
       if (generation !== sceneGenerationRef.current) return
-      if (await reconcileUnsaved(generation)) return
       await applyLoadedScene(result.elements.map(cleanElementForExcalidraw), generation, filesResult.files)
     } catch (error) {
       failSceneLoad(error, generation)
@@ -502,6 +518,7 @@ function App(): JSX.Element {
 
     socket.onopen = () => {
       if (websocketRef.current !== socket) return
+      reconnectTriesRef.current = 0
       setIsConnected(true)
       void loadExistingElements()
     }
@@ -523,7 +540,7 @@ function App(): JSX.Element {
 
       // Reconnect after 3 seconds if not a clean close
       if (event.code !== 1000) {
-        reconnectTimerRef.current = setTimeout(connectWebSocket, 3000)
+        reconnectTimerRef.current = setTimeout(connectWebSocket, reconnectTriesRef.current++ ? 3000 : 500)
       }
     }
 
@@ -584,7 +601,6 @@ function App(): JSX.Element {
             // Measure the first scene with the real fonts, not a fallback
             await preloadCanvasFonts()
             if (generation !== sceneGenerationRef.current) return
-            if (await reconcileUnsaved(generation)) return
             await applyLoadedScene(data.elements.map(cleanElementForExcalidraw), generation, (data as any).files)
           }
           break
@@ -655,6 +671,7 @@ function App(): JSX.Element {
           if (autoSyncTimerRef.current) { clearTimeout(autoSyncTimerRef.current); autoSyncTimerRef.current = null }
           projectRef.current = (data as any).project
           draftLoadRef.current = null
+          setSceneShown(false)
           window.dispatchEvent(new CustomEvent('canvas-project', { detail: (data as any).project }))
           break
 
@@ -1031,7 +1048,7 @@ function App(): JSX.Element {
           void dropDraft(sceneProjectRef.current)
         }
         // A fresh thumbnail at most once a minute while the board changes.
-        if (Date.now() - thumbAtRef.current > 60_000) { thumbAtRef.current = Date.now(); void saveThumb() }
+        if (Date.now() - thumbAtRef.current > 60_000) { thumbAtRef.current = Date.now(); thumbSoon() }
         setLastSyncTime(new Date())
         console.log(`Sync successful: ${result.count} elements synced`)
 
@@ -1123,7 +1140,7 @@ function App(): JSX.Element {
         </div>
       </div>
 
-      {sceneLoadStatus !== 'ready' && (
+      {sceneLoadStatus !== 'ready' && (sceneLoadStatus === 'failed' || !sceneShown) && (
         <div className="scene-load-status" role={sceneLoadStatus === 'failed' ? 'alert' : 'status'}>
           <span>{sceneLoadStatus === 'failed'
             ? 'Canvas could not be loaded. Sync is paused to protect your saved scene.'
@@ -1140,6 +1157,7 @@ function App(): JSX.Element {
         <div
           onPointerDownCapture={() => {
             userInteractedRef.current = true
+            penDownRef.current = true
           }}
           onKeyDownCapture={() => {
             userInteractedRef.current = true
@@ -1147,7 +1165,7 @@ function App(): JSX.Element {
           style={{ width: '100%', height: '100%' }}
         >
           <Excalidraw
-            viewModeEnabled={sceneLoadStatus !== 'ready'}
+            viewModeEnabled={!sceneShown}
             excalidrawAPI={(api: ExcalidrawAPIRefValue) => setExcalidrawAPI(api)}
             onChange={(_elements, appState) => {
               if (appState?.theme && appState.theme !== theme) {
