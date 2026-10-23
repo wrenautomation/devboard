@@ -434,5 +434,12 @@ export const prepareServerScene = (
     { repairBindings: true, refreshDimensions: opts.refreshDimensions ?? false }
   )
   assertScenePreserved(elements, restored)
+  // Conversion makes new shapes with version 1 and a random nonce. Offline sync compares the stored
+  // version with the one the server confirmed, so every element keeps the version it came with.
+  const source = new Map(elements.map(el => [el.id, el]))
+  for (const el of restored as any[]) {
+    const from = source.get(el.id)
+    if (from && Number.isFinite(from.version)) { el.version = from.version; el.versionNonce = from.versionNonce ?? 0 }
+  }
   return restored
 }

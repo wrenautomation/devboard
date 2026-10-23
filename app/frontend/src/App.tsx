@@ -7,7 +7,8 @@ import {
   exportToSvg,
   elementsOverlappingBBox,
   useHandleLibrary,
-  newElementWith
+  newElementWith,
+  reconcileElements
 } from '@excalidraw/excalidraw'
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
@@ -90,11 +91,16 @@ const libraryAdapter: LibraryPersistenceAdapter = {
 }
 
 
-// Local patch: drafts. Edits the Mac hasn't confirmed are kept in this browser per project, so a
-// dropped connection, a killed tab or a reload never loses them; they go up on the next connect.
-type Draft = { elements: unknown[]; version: number; at: number }
-// v2: v1 drafts could hold another board's scene (saved under the new name during a switch); they are ignored.
-const draftKey = (project: string) => `draft2:${project}`
+// Local patch: offline first. Each board has a replica in this browser: its elements and, per element,
+// the version the Mac last confirmed (acked). An element whose version differs from its ack is pending:
+// the next push sends it. The Mac keeps the newer version of each element, so a retry is safe.
+type Replica = { elements: unknown[]; acked: Record<string, string> }
+const replicaKey = (project: string) => `replica:${project}`
+const stamp = (el: { version?: number; versionNonce?: number }) => `${el.version}:${el.versionNonce ?? 0}`
+// The board to open from the replica when the Mac can't be reached.
+const LAST_PROJECT_KEY = 'canvas-last-project'
+const lastProject = () => { try { return window.localStorage?.getItem(LAST_PROJECT_KEY) ?? null } catch { return null } }
+const rememberProject = (p: string) => { try { window.localStorage?.setItem(LAST_PROJECT_KEY, p) } catch { /* private mode */ } }
 const idb = async <T,>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> => {
   const db = await libraryDb()
   return new Promise<T>((resolve, reject) => {
@@ -103,9 +109,13 @@ const idb = async <T,>(mode: IDBTransactionMode, run: (store: IDBObjectStore) =>
     req.onerror = () => reject(req.error)
   })
 }
-const readDraft = (project: string) => idb<Draft | undefined>('readonly', st => st.get(draftKey(project))).catch(() => undefined)
-const writeDraft = (project: string, draft: Draft) => idb('readwrite', st => st.put(draft, draftKey(project))).catch(() => undefined)
-const dropDraft = (project: string) => idb('readwrite', st => st.delete(draftKey(project))).catch(() => undefined)
+const readReplica = (project: string) => idb<Replica | undefined>('readonly', st => st.get(replicaKey(project))).catch(() => undefined)
+const writeReplica = (project: string, r: Replica) => idb('readwrite', st => st.put(r, replicaKey(project))).catch(() => undefined)
+const dropReplica = (project: string) => idb('readwrite', st => st.delete(replicaKey(project))).catch(() => undefined)
+// Image data once per file, apart from the replica: it never changes, and it is the bulk of the bytes.
+type StoredFile = Parameters<ExcalidrawImperativeAPI['addFiles']>[0][number]
+const readFile = (id: string) => idb<StoredFile | undefined>('readonly', st => st.get(`file:${id}`)).catch(() => undefined)
+const writeFile = (f: StoredFile) => idb('readwrite', st => st.put(f, `file:${f.id}`)).catch(() => undefined)
 // Changes whenever any element is added, edited or deleted (Excalidraw bumps `version` on each edit).
 const sceneVersion = (els: readonly { version: number }[]): number =>
   els.reduce((sum, el) => sum + el.version, 0) * 1000 + els.length
@@ -173,7 +183,7 @@ type SyncStatus = 'idle' | 'syncing' | 'success' | 'error';
 type SceneLoadStatus = 'loading' | 'ready' | 'failed';
 const AUTO_SYNC_DEBOUNCE_MS = 1200;
 const SCENE_MUTATIONS = new Set([
-  'element_created', 'element_updated', 'element_deleted', 'elements_batch_created'
+  'element_created', 'element_updated', 'element_deleted', 'elements_batch_created', 'elements_merged'
 ]);
 
 function App(): JSX.Element {
@@ -218,15 +228,20 @@ function App(): JSX.Element {
     window.addEventListener('pointercancel', up)
     return () => { window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up) }
   }, [])
-  const syncedVersionRef = useRef<number>(0)
-  const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Per element of the scene's board: the version the Mac confirmed. See Replica.
+  const ackedRef = useRef<Map<string, string>>(new Map())
+  const isPending = (el: ExcalidrawElement): boolean => ackedRef.current.get(el.id) !== stamp(el)
+  const replicaTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const replicaVersionRef = useRef<number>(-1)
+  const storedFilesRef = useRef<Set<string>>(new Set())
+  // A scene (from the Mac or the replica) is on screen; from then on the replica follows it.
   const loadedOnceRef = useRef<boolean>(false)
   const [iconsOpen, setIconsOpen] = useState(false)
   useEffect(() => {
     fetch('/api/projects').then(r => (r.ok ? r.json() : null)).then(d => {
-      if (d && !projectRef.current) projectRef.current = d.current
+      if (d && !projectRef.current) { projectRef.current = d.current; rememberProject(d.current) }
     }).catch(() => {})
-    const onProject = (e: Event) => { projectRef.current = (e as CustomEvent<string>).detail }
+    const onProject = (e: Event) => { projectRef.current = (e as CustomEvent<string>).detail; rememberProject(projectRef.current!) }
     window.addEventListener('canvas-project', onProject)
     return () => window.removeEventListener('canvas-project', onProject)
   }, [])
@@ -248,6 +263,9 @@ function App(): JSX.Element {
   // Sync state management
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle')
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null)
+  // Elements the Mac has not confirmed, and whether the last push failed (header text).
+  const [unsent, setUnsent] = useState(0)
+  const [pushFailed, setPushFailed] = useState(false)
   const autoSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const syncInFlightRef = useRef<boolean>(false)
   const suppressAutoSyncCountRef = useRef<number>(0)
@@ -261,9 +279,8 @@ function App(): JSX.Element {
     }
   }
   const [sceneLoadStatus, setSceneLoadStatus] = useState<SceneLoadStatus>('loading')
-  // A full scene of the open board is on screen. From then on the pen stays live through reconnects and
-  // reloads: edits wait as a draft and push when sync opens again (reconcileUnsaved). Only the first
-  // scene of a board blocks input.
+  // A scene of the open board is on screen (from the Mac or the replica). From then on the pen stays
+  // live through reconnects and reloads: edits wait in the replica and push when sync opens again.
   const [sceneShown, setSceneShown] = useState(false)
   const sceneLoadStatusRef = useRef<SceneLoadStatus>('loading')
   const sceneGenerationRef = useRef(0)
@@ -295,7 +312,6 @@ function App(): JSX.Element {
     suppressAutoSyncCountRef.current += 1
     try {
       api.updateScene(scene)
-      syncedVersionRef.current = sceneVersion(api.getSceneElementsIncludingDeleted())
     } finally {
       setTimeout(() => {
         suppressAutoSyncCountRef.current = Math.max(0, suppressAutoSyncCountRef.current - 1)
@@ -303,83 +319,137 @@ function App(): JSX.Element {
     }
   }
 
-  const isDirty = (): boolean => {
-    const api = excalidrawAPIRef.current
-    return !!api && loadedOnceRef.current &&
-      sceneVersion(api.getSceneElementsIncludingDeleted()) !== syncedVersionRef.current
-  }
-  const saveDraftNow = (): void => {
+  // Write the scene's board to its replica: every live element, and deletes the Mac has not confirmed.
+  const saveReplicaNow = (force = false): void => {
     const api = excalidrawAPIRef.current, project = sceneProjectRef.current
-    if (!api || !project || !isDirty()) return
-    void writeDraft(project, {
-      elements: api.getSceneElementsIncludingDeleted().filter(el => !el.isDeleted),
-      version: sceneVersion(api.getSceneElementsIncludingDeleted()), at: Date.now(),
+    if (!api || !project || !loadedOnceRef.current) return
+    const all = api.getSceneElementsIncludingDeleted()
+    const version = sceneVersion(all)
+    if (!force && version === replicaVersionRef.current) return
+    setUnsent(all.filter(isPending).length)
+    replicaVersionRef.current = version
+    void writeReplica(project, {
+      elements: all.filter(el => !el.isDeleted || isPending(el)),
+      acked: Object.fromEntries(ackedRef.current),
     })
-  }
-  // A full server scene arrived while this tab holds unsaved edits (reconnect). Same project: the
-  // tab wins and pushes. Project changed meanwhile: the edits stay as that project's draft.
-  const reconcileUnsaved = async (generation: number): Promise<boolean> => {
-    if (!isDirty()) return false
-    saveDraftNow()
-    const p = await fetch('/api/projects').then(r => (r.ok ? r.json() : null)).catch(() => null)
-    if (p && projectRef.current && p.current !== projectRef.current) {
-      projectRef.current = p.current
-      window.dispatchEvent(new CustomEvent('canvas-project', { detail: p.current }))
-      return false
+    for (const f of Object.values(api.getFiles())) {
+      if (!storedFilesRef.current.has(f.id)) { storedFilesRef.current.add(f.id); void writeFile(f) }
     }
-    if (generation !== sceneGenerationRef.current) return true
-    sceneLoadStatusRef.current = 'ready'
-    setSceneLoadStatus('ready')
-    await syncToBackend({ silent: true })
-    return true
   }
-  // A draft the Mac never got, read once per project before its first scene is shown.
-  const draftLoadRef = useRef<Promise<Draft | undefined> | null>(null)
-  const loadDraftOnce = (): Promise<Draft | undefined> => {
-    if (!draftLoadRef.current) {
-      draftLoadRef.current = (async () => {
-        if (!projectRef.current) {
-          const p = await fetch('/api/projects').then(r => (r.ok ? r.json() : null)).catch(() => null)
-          if (p && !projectRef.current) projectRef.current = p.current
-        }
-        return projectRef.current ? readDraft(projectRef.current) : undefined
-      })()
+  // Same main-thread rule as the thumbnail: write while the pen is up.
+  const replicaSoon = (): void => {
+    if (replicaTimerRef.current) return
+    replicaTimerRef.current = setTimeout(() => {
+      replicaTimerRef.current = null
+      if (penDownRef.current) replicaSoon(); else saveReplicaNow()
+    }, 400)
+  }
+  // The board the Mac has open. Offline, the last board this browser showed.
+  const resolveProject = async (): Promise<string | null> => {
+    if (!projectRef.current) {
+      const p = await fetch('/api/projects').then(r => (r.ok ? r.json() : null)).catch(() => null)
+      if (p && !projectRef.current) { projectRef.current = p.current; rememberProject(p.current) }
     }
-    return draftLoadRef.current
+    return projectRef.current
   }
-  // Show the server scene, or this project's unsaved draft in its place; the draft stays dirty
-  // (and stored) until a save is confirmed.
-  const applyLoadedScene = async (
-    incoming: readonly Partial<ExcalidrawElement>[], generation: number, files?: Record<string, unknown>
-  ): Promise<void> => {
-    const draft = await loadDraftOnce()
-    if (generation !== sceneGenerationRef.current) return
-    // The pen stays live while a scene loads: a stroke drawn during the load wins over the server scene.
-    if (await reconcileUnsaved(generation)) return
-    if (!draft) { applyServerScene(incoming, generation, files); return }
-    draftLoadRef.current = Promise.resolve(undefined)
-    applyServerScene(draft.elements as Partial<ExcalidrawElement>[], generation, files)
-    syncedVersionRef.current = -1
-    console.log(`Restored ${draft.elements.length} unsaved elements for ${projectRef.current}`)
-    await syncToBackend({ silent: true })
+  const addStoredFiles = async (api: ExcalidrawImperativeAPI, els: readonly any[], have: Record<string, unknown> = {}): Promise<void> => {
+    const ids = [...new Set(els.flatMap(el => (el.type === 'image' && el.fileId && !have[el.fileId] ? [el.fileId] : [])))]
+    const found = (await Promise.all(ids.map(readFile))).filter(Boolean) as StoredFile[]
+    if (found.length) api.addFiles(found)
   }
 
-  // Leaving the tab (app switch, lock screen, close): keep a draft and save now, without the
-  // 1.2s debounce. iPad Safari suspends hidden tabs, so a pending timer may never fire.
+  // Open the board from this browser at once, before (or without) the Mac. The Mac's scene merges in later.
+  const openReplica = async (): Promise<void> => {
+    const project = projectRef.current ?? lastProject()
+    const replica = project ? await readReplica(project) : undefined
+    const api = excalidrawAPIRef.current
+    if (!api || !replica || loadedOnceRef.current || (projectRef.current && projectRef.current !== project)) return
+    await addStoredFiles(api, replica.elements)
+    if (loadedOnceRef.current) return
+    applySceneUpdateWithoutAutoSync(api, { elements: replica.elements as ExcalidrawElement[], captureUpdate: CaptureUpdateAction.NEVER })
+    ackedRef.current = new Map(Object.entries(replica.acked))
+    sceneProjectRef.current = project
+    replicaVersionRef.current = sceneVersion(api.getSceneElementsIncludingDeleted())
+    loadedOnceRef.current = true
+    setSceneShown(true)
+    console.log(`Opened ${project} from this device: ${replica.elements.length} elements`)
+  }
+
+  // A full scene from the Mac. Merge per element with what this browser has not sent yet: the newer
+  // version wins (Excalidraw's reconcileElements). A confirmed element the Mac no longer has was deleted
+  // there, so it goes. The base is the scene on screen only when it shows the same board; else that
+  // board's replica, so one board's shapes never reach another.
+  const applyLoadedScene = async (
+    incoming: readonly Partial<ExcalidrawElement>[], generation: number, files?: Record<string, unknown>, board?: string
+  ): Promise<void> => {
+    if (board && board !== projectRef.current) {
+      projectRef.current = board
+      rememberProject(board)
+      window.dispatchEvent(new CustomEvent('canvas-project', { detail: board }))
+    }
+    const project = await resolveProject()
+    const api = excalidrawAPIRef.current
+    if (!api || generation !== sceneGenerationRef.current) return
+    const same = loadedOnceRef.current && sceneProjectRef.current === project
+    const replica = same || !project ? undefined : await readReplica(project)
+    if (generation !== sceneGenerationRef.current) return
+    const acked = same ? ackedRef.current : new Map(Object.entries(replica?.acked ?? {}))
+    const base = (same ? api.getSceneElementsIncludingDeleted() : replica?.elements ?? []) as ExcalidrawElement[]
+    const local = base.filter(el => acked.get(el.id) !== stamp(el))
+    const prepared = prepareServerScene(incoming)
+    const merged = local.length
+      ? reconcileElements(local as any, prepared as any, api.getAppState()) as unknown as ExcalidrawElement[]
+      : prepared
+    // Acked: what the Mac holds. Labels made here from an agent's shape are not on the Mac yet: they go up.
+    const fromMac = new Map(incoming.map(el => [el.id, stamp(el)]))
+    const nextAcked = new Map<string, string>()
+    for (const el of merged) if (fromMac.get(el.id) === stamp(el)) nextAcked.set(el.id, stamp(el))
+    if (!same && local.length) await addStoredFiles(api, local, files)
+    if (generation !== sceneGenerationRef.current) return
+    showScene(merged, generation, files)
+    ackedRef.current = nextAcked
+    saveReplicaNow(true)
+    const pending = merged.filter(isPending).length
+    if (pending) {
+      console.log(`Merged ${pending} elements kept on this device into ${project}`)
+      void syncToBackend({ silent: true })
+    }
+  }
+
+  // Leaving the tab (app switch, lock screen, close): write the replica and push now, without the
+  // debounce. iPad Safari suspends hidden tabs, so a pending timer may never fire.
   const flushOnLeaveRef = useRef<() => void>(() => {})
   flushOnLeaveRef.current = () => {
-    if (!isDirty()) return
-    saveDraftNow()
+    saveReplicaNow()
     void syncToBackend({ silent: true })
   }
+  // Back online, or back on the tab: connect now, not at the next retry; then push.
+  const resumeRef = useRef<() => void>(() => {})
+  resumeRef.current = () => {
+    const ws = websocketRef.current
+    if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
+      reconnectTriesRef.current = 0
+      connectWebSocket()
+    } else void syncToBackend({ silent: true })
+  }
   useEffect(() => {
-    const onHide = () => { if (document.visibilityState === 'hidden') flushOnLeaveRef.current() }
+    const onVisibility = () => (document.visibilityState === 'hidden' ? flushOnLeaveRef.current() : resumeRef.current())
     const onPageHide = () => flushOnLeaveRef.current()
-    document.addEventListener('visibilitychange', onHide)
+    const onOnline = () => resumeRef.current()
+    // The socket can stay half open after the network goes; close it, so the header and retries follow.
+    const onOffline = () => websocketRef.current?.close()
+    document.addEventListener('visibilitychange', onVisibility)
     window.addEventListener('pagehide', onPageHide)
+    window.addEventListener('online', onOnline)
+    window.addEventListener('offline', onOffline)
+    // Ask the browser not to evict the replicas under storage pressure.
+    void navigator.storage?.persist?.().catch(() => {})
     return () => {
-      document.removeEventListener('visibilitychange', onHide)
+      document.removeEventListener('visibilitychange', onVisibility)
       window.removeEventListener('pagehide', onPageHide)
+      window.removeEventListener('online', onOnline)
+      window.removeEventListener('offline', onOffline)
     }
   }, [])
 
@@ -389,18 +459,28 @@ function App(): JSX.Element {
     files?: Record<string, unknown>,
     opts: { refreshDimensions?: boolean } = {}
   ): void => {
+    showScene(prepareServerScene(incoming, opts), generation, files)
+  }
+
+  // Replace the visible scene with a prepared one. restoreElements() can silently filter elements,
+  // so the API readback is checked. Deletes this browser has not pushed yet stay in the scene.
+  const showScene = (
+    prepared: readonly ExcalidrawElement[],
+    generation: number,
+    files?: Record<string, unknown>
+  ): void => {
     const api = excalidrawAPIRef.current
     if (!api || generation !== sceneGenerationRef.current) return
-    // Prepare everything before replacing the visible scene. restoreElements()
-    // can silently filter elements, so both conversion and API readback need checks.
-    const prepared = prepareServerScene(incoming, opts)
     const previous = api.getSceneElementsIncludingDeleted()
+    const ids = new Set(prepared.map(el => el.id))
+    const unsentDeletes = sceneProjectRef.current === projectRef.current
+      ? previous.filter(el => el.isDeleted && !ids.has(el.id) && isPending(el)) : []
     try {
       if (files) {
         api.addFiles(Object.values(files) as Parameters<typeof api.addFiles>[0])
         rememberServerFiles(files)
       }
-      applySceneUpdateWithoutAutoSync(api, { elements: prepared, captureUpdate: CaptureUpdateAction.NEVER })
+      applySceneUpdateWithoutAutoSync(api, { elements: [...prepared, ...unsentDeletes], captureUpdate: CaptureUpdateAction.NEVER })
       assertScenePreserved(prepared, api.getSceneElements())
     } catch (error) {
       applySceneUpdateWithoutAutoSync(api, { elements: previous, captureUpdate: CaptureUpdateAction.NEVER })
@@ -415,6 +495,41 @@ function App(): JSX.Element {
     setSceneLoadStatus('ready')
     setSceneShown(true)
     loadedOnceRef.current = true
+  }
+
+  // Elements the Mac sent one by one (an agent's edit, another tab's push, a push's losers). An element
+  // this browser changed and not sent yet stays when it is the newer one; the echo of our own push is a no-op.
+  const mergeRemote = (incoming: Partial<ExcalidrawElement>[]): void => {
+    const api = excalidrawAPIRef.current
+    if (!api || !incoming.length) return
+    const current = new Map(api.getSceneElementsIncludingDeleted().map(el => [el.id, el]))
+    const newer = (a: Partial<ExcalidrawElement>, b: ExcalidrawElement) =>
+      a.version! > b.version || (a.version === b.version && (a.versionNonce ?? 0) < b.versionNonce)
+    const take = new Map<string, Partial<ExcalidrawElement>>()
+    for (const el of incoming) {
+      const cur = current.get(el.id!)
+      if (cur && stamp(cur) === stamp(el)) { ackedRef.current.set(cur.id, stamp(cur)); continue }
+      if (cur && isPending(cur) && !newer(el, cur)) continue
+      if (!cur && el.isDeleted) continue
+      take.set(el.id!, el)
+      ackedRef.current.set(el.id!, stamp(el))
+    }
+    if (!take.size) return
+    const next: Partial<ExcalidrawElement>[] = []
+    for (const el of api.getSceneElements()) {
+      const inc = take.get(el.id)
+      if (!inc) { next.push(el); continue }
+      take.delete(el.id)
+      if (!inc.isDeleted) next.push({ ...el, ...inc })
+    }
+    next.push(...[...take.values()].filter(el => !el.isDeleted))
+    // `refreshDimensions` re-wraps bound text from its `originalText`. An
+    // update can resize a container (`update_element` with a new width),
+    // and without this the label keeps the line breaks computed for the old
+    // box — the shape grows, the text stays broken where it was.
+    applyServerScene(next, pauseSceneSync(), undefined, { refreshDimensions: true })
+    saveReplicaNow(true)
+    if (api.getSceneElementsIncludingDeleted().some(isPending)) pushSoon()
   }
 
   useEffect(() => {
@@ -472,6 +587,7 @@ function App(): JSX.Element {
     if (excalidrawAPI) {
       // initial_elements may arrive before the API exists. HTTP is the fallback;
       // later WebSocket scenes invalidate this request through its generation.
+      void openReplica()
       if (sceneLoadStatusRef.current !== 'ready') void loadExistingElements()
     }
   }, [excalidrawAPI])
@@ -494,7 +610,7 @@ function App(): JSX.Element {
       }
       await preloadCanvasFonts()
       if (generation !== sceneGenerationRef.current) return
-      await applyLoadedScene(result.elements.map(cleanElementForExcalidraw), generation, filesResult.files)
+      await applyLoadedScene(result.elements.map(cleanElementForExcalidraw), generation, filesResult.files, (result as any).project)
     } catch (error) {
       failSceneLoad(error, generation)
     }
@@ -567,31 +683,6 @@ function App(): JSX.Element {
 
     try {
       const currentElements = excalidrawAPI.getSceneElements()
-      const mergeAndApplySceneElements = (incomingElements: Partial<ExcalidrawElement>[]): void => {
-        if (incomingElements.length === 0) return
-
-        const incomingById = new Map<string, Partial<ExcalidrawElement>>()
-        incomingElements.forEach((element) => {
-          if (element.id) {
-            incomingById.set(element.id, element)
-          }
-        })
-
-        const mergedElements: Partial<ExcalidrawElement>[] = currentElements.map((element) => {
-          const incoming = incomingById.get(element.id)
-          if (!incoming) return element
-          incomingById.delete(element.id)
-          return { ...element, ...incoming }
-        })
-
-        mergedElements.push(...incomingById.values())
-
-        // `refreshDimensions` re-wraps bound text from its `originalText`. An
-        // update can resize a container (`update_element` with a new width),
-        // and without this the label keeps the line breaks computed for the old
-        // box — the shape grows, the text stays broken where it was.
-        applyServerScene(mergedElements, pauseSceneSync(), undefined, { refreshDimensions: true })
-      }
 
       switch (data.type) {
         case 'initial_elements':
@@ -601,7 +692,7 @@ function App(): JSX.Element {
             // Measure the first scene with the real fonts, not a fallback
             await preloadCanvasFonts()
             if (generation !== sceneGenerationRef.current) return
-            await applyLoadedScene(data.elements.map(cleanElementForExcalidraw), generation, (data as any).files)
+            await applyLoadedScene(data.elements.map(cleanElementForExcalidraw), generation, (data as any).files, (data as any).project)
           }
           break
 
@@ -622,18 +713,16 @@ function App(): JSX.Element {
         case 'element_created':
           if (!data.element) throw new Error('Missing created element')
           if (data.element) {
-            const cleanedNewElement = cleanElementForExcalidraw(data.element)
             // Rebuild against full scene so text/container bindings remain intact.
-            mergeAndApplySceneElements([cleanedNewElement])
+            mergeRemote([cleanElementForExcalidraw(data.element)])
           }
           break
 
         case 'element_updated':
           if (!data.element) throw new Error('Missing updated element')
           if (data.element) {
-            const cleanedUpdatedElement = cleanElementForExcalidraw(data.element)
             // Convert with full scene context so text metrics/container placement can refresh.
-            mergeAndApplySceneElements([cleanedUpdatedElement])
+            mergeRemote([cleanElementForExcalidraw(data.element)])
           }
           break
 
@@ -642,20 +731,26 @@ function App(): JSX.Element {
           if (data.elementId) {
             const filteredElements = currentElements.filter(el => el.id !== data.elementId)
             applyServerScene(filteredElements, pauseSceneSync())
+            ackedRef.current.delete(data.elementId)
+            saveReplicaNow(true)
           }
           break
 
         case 'elements_batch_created':
           if (!Array.isArray(data.elements)) throw new Error('Invalid element batch')
           if (data.elements) {
-            const cleanedBatchElements = data.elements.map(cleanElementForExcalidraw)
-            mergeAndApplySceneElements(cleanedBatchElements)
+            mergeRemote(data.elements.map(cleanElementForExcalidraw))
           }
           break
 
+        case 'elements_merged':
+          if (!Array.isArray((data as any).elements)) throw new Error('Invalid merged elements')
+          mergeRemote((data as any).elements.map(cleanElementForExcalidraw))
+          break
+
         case 'elements_synced':
-          console.log(`Sync confirmed by server: ${data.count} elements`)
-          // Sync confirmation already handled by HTTP response
+          // Tabs push; a full overwrite comes from an agent. Take the whole scene again.
+          void loadExistingElements()
           break
 
         case 'sync_status':
@@ -663,14 +758,11 @@ function App(): JSX.Element {
           break
 
         case 'project_opened':
-          // Edits for the old project that never reached the Mac stay as its draft.
-          saveDraftNow()
-          if (excalidrawAPIRef.current) {
-            syncedVersionRef.current = sceneVersion(excalidrawAPIRef.current.getSceneElementsIncludingDeleted())
-          }
+          // Edits for the old project that never reached the Mac stay in its replica.
+          saveReplicaNow(true)
           if (autoSyncTimerRef.current) { clearTimeout(autoSyncTimerRef.current); autoSyncTimerRef.current = null }
           projectRef.current = (data as any).project
-          draftLoadRef.current = null
+          rememberProject(projectRef.current!)
           setSceneShown(false)
           window.dispatchEvent(new CustomEvent('canvas-project', { detail: (data as any).project }))
           break
@@ -679,7 +771,8 @@ function App(): JSX.Element {
           const { from, to } = data as any
           if (projectRef.current === from) projectRef.current = to
           if (sceneProjectRef.current === from) sceneProjectRef.current = to
-          void readDraft(from).then(d => d && writeDraft(to, d).then(() => dropDraft(from)))
+          void readReplica(from).then(r => r && writeReplica(to, r).then(() => dropReplica(from)))
+          if (lastProject() === from) rememberProject(to)
           window.dispatchEvent(new CustomEvent('canvas-project', { detail: projectRef.current }))
           break
         }
@@ -949,13 +1042,6 @@ function App(): JSX.Element {
     }
   }
 
-  // Data format conversion for backend
-  const convertToBackendFormat = (element: ExcalidrawElement): ServerElement => {
-    return {
-      ...element
-    } as ServerElement
-  }
-
   // Format sync time display
   const formatSyncTime = (time: Date | null): string => {
     if (!time) return ''
@@ -966,7 +1052,9 @@ function App(): JSX.Element {
     })
   }
 
-  // Main sync function
+  // Push: send the elements the Mac has not confirmed, deletes included. Ack each by the version sent,
+  // so an edit made while the request runs stays pending. Losers come back and replace ours.
+  const pushAgainRef = useRef(false)
   const syncToBackend = async (options: { silent?: boolean } = {}): Promise<void> => {
     const { silent = false } = options
     // Every caller, including manual sync and Mermaid, must respect a failed
@@ -976,12 +1064,10 @@ function App(): JSX.Element {
     // Read through the ref: WS message handlers attached at mount capture a
     // stale closure where the excalidrawAPI state is still null.
     const api = excalidrawAPIRef.current
-    if (!api) {
-      console.warn('Excalidraw API not available')
-      return
-    }
+    if (!api) return
 
     if (syncInFlightRef.current) {
+      pushAgainRef.current = true
       return
     }
 
@@ -990,26 +1076,21 @@ function App(): JSX.Element {
       autoSyncTimerRef.current = null
     }
 
+    const sent = api.getSceneElementsIncludingDeleted().filter(isPending)
+    if (!sent.length) return
     syncInFlightRef.current = true
     if (!silent) {
       setSyncStatus('syncing')
     }
+    const project = sceneProjectRef.current
 
     try {
-      // 1. Get current elements
-      const currentElements = api.getSceneElements()
-      const sentVersion = sceneVersion(api.getSceneElementsIncludingDeleted())
-      console.log(`Syncing ${currentElements.length} elements to backend`)
-
-      // Filter out deleted elements
-      const activeElements = currentElements.filter(el => !el.isDeleted)
-
-      // 2. Upload image files the server lacks, before the elements that use
+      // Upload image files the server lacks, before the elements that use
       // them. An image element only holds a fileId; without the file the
       // server keeps a dangling reference and a reload shows a broken image.
       // One request per file keeps each body under the server's JSON limit.
-      const usedFileIds = new Set(activeElements.flatMap(el =>
-        el.type === 'image' && el.fileId ? [el.fileId as string] : []))
+      const usedFileIds = new Set(sent.flatMap(el =>
+        el.type === 'image' && !el.isDeleted && el.fileId ? [el.fileId as string] : []))
       const newFiles = Object.values(api.getFiles()).filter(file =>
         usedFileIds.has(file.id) && file.dataURL && !serverFileIdsRef.current.has(file.id))
       for (const file of newFiles) {
@@ -1024,33 +1105,27 @@ function App(): JSX.Element {
         serverFileIdsRef.current.add(file.id)
       }
 
-      // 3. Convert to backend format
-      const backendElements = activeElements.map(convertToBackendFormat)
-
-      // 4. Send to backend
-      const response = await fetch('/api/elements/sync', {
+      const response = await fetch('/api/elements/push', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...TAB,
-          ...(sceneProjectRef.current ? { 'x-canvas-project': sceneProjectRef.current } : {}),
+          ...(project ? { 'x-canvas-project': project } : {}),
         },
-        body: JSON.stringify({
-          elements: backendElements,
-          timestamp: new Date().toISOString()
-        })
+        body: JSON.stringify({ elements: sent })
       })
 
       if (response.ok) {
-        const result: ApiResponse = await response.json()
-        syncedVersionRef.current = sentVersion
-        if (sceneProjectRef.current && sceneVersion(api.getSceneElementsIncludingDeleted()) === sentVersion) {
-          void dropDraft(sceneProjectRef.current)
-        }
+        const result = await response.json() as { applied: { id: string; version: number; versionNonce: number }[]; rejected: ServerElement[] }
+        // The scene moved to another board meanwhile: its acks are not this board's.
+        if (sceneProjectRef.current !== project) return
+        setPushFailed(false)
+        for (const a of result.applied) ackedRef.current.set(a.id, stamp(a))
+        if (result.rejected.length) mergeRemote(result.rejected.map(cleanElementForExcalidraw))
+        saveReplicaNow(true)
         // A fresh thumbnail at most once a minute while the board changes.
         if (Date.now() - thumbAtRef.current > 60_000) { thumbAtRef.current = Date.now(); thumbSoon() }
         setLastSyncTime(new Date())
-        console.log(`Sync successful: ${result.count} elements synced`)
 
         if (!silent) {
           setSyncStatus('success')
@@ -1058,49 +1133,44 @@ function App(): JSX.Element {
           setTimeout(() => setSyncStatus('idle'), 2000)
         }
       } else if (response.status === 409) {
-        // The Mac has another project open. Keep these edits as this project's draft; the switch
+        // The Mac has another project open. These edits stay in this board's replica; the switch
         // events bring the right scene. Never retry into the wrong project.
-        console.warn('Sync refused: another project is open; edits kept as a draft')
-        saveDraftNow()
+        console.warn('Push refused: another project is open; edits kept on this device')
+        saveReplicaNow(true)
         if (autoSyncTimerRef.current) { clearTimeout(autoSyncTimerRef.current); autoSyncTimerRef.current = null }
       } else {
         const error: ApiResponse = await response.json()
-        console.error('Sync failed:', error.error)
+        console.error('Push failed:', error.error)
         if (!silent) {
           setSyncStatus('error')
         }
       }
     } catch (error) {
-      console.error('Sync error:', error)
+      console.error('Push error:', error)
+      setPushFailed(true)
       if (!silent) {
         setSyncStatus('error')
       }
     } finally {
       syncInFlightRef.current = false
+      if (pushAgainRef.current) { pushAgainRef.current = false; pushSoon() }
     }
   }
 
-  const scheduleAutoSync = (): void => {
-    if (!canSyncScene() || !excalidrawAPI) {
-      return
-    }
-    if (!userInteractedRef.current) {
-      return
-    }
-    if (suppressAutoSyncCountRef.current > 0) {
-      return
-    }
+  const pushSoon = (): void => {
+    if (!canSyncScene()) return
     if (autoSyncTimerRef.current) {
       clearTimeout(autoSyncTimerRef.current)
     }
-
     autoSyncTimerRef.current = setTimeout(() => {
       autoSyncTimerRef.current = null
-      if (suppressAutoSyncCountRef.current > 0 || syncInFlightRef.current) {
-        return
-      }
       void syncToBackend({ silent: true })
     }, AUTO_SYNC_DEBOUNCE_MS)
+  }
+
+  const scheduleAutoSync = (): void => {
+    if (!userInteractedRef.current || suppressAutoSyncCountRef.current > 0) return
+    pushSoon()
   }
 
   // An ordinary edit: every shape deleted in one undo step, then saved. Undo brings them back.
@@ -1130,8 +1200,8 @@ function App(): JSX.Element {
             {/* Local patch: saving is automatic; this only reports it. */}
             <span className="save-state" role="status">
               {!isConnected ? 'Offline · kept on this device'
-                : syncStatus === 'syncing' ? 'Saving…'
-                : syncStatus === 'error' ? 'Not saved yet · kept on this device'
+                : unsent && pushFailed ? 'Not saved yet · kept on this device'
+                : unsent || syncStatus === 'syncing' ? 'Saving…'
                 : 'Saved'}
             </span>
           </div>
@@ -1140,7 +1210,7 @@ function App(): JSX.Element {
         </div>
       </div>
 
-      {sceneLoadStatus !== 'ready' && (sceneLoadStatus === 'failed' || !sceneShown) && (
+      {sceneLoadStatus !== 'ready' && !sceneShown && (
         <div className="scene-load-status" role={sceneLoadStatus === 'failed' ? 'alert' : 'status'}>
           <span>{sceneLoadStatus === 'failed'
             ? 'Canvas could not be loaded. Sync is paused to protect your saved scene.'
@@ -1177,9 +1247,7 @@ function App(): JSX.Element {
                 }
               }
               scheduleAutoSync()
-              if (!draftTimerRef.current && isDirty()) {
-                draftTimerRef.current = setTimeout(() => { draftTimerRef.current = null; saveDraftNow() }, 400)
-              }
+              if (loadedOnceRef.current && sceneVersion(_elements) !== replicaVersionRef.current) replicaSoon()
             }}
             initialData={{
               elements: [],

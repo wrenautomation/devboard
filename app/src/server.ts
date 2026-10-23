@@ -184,6 +184,7 @@ wss.on('connection', (ws: WebSocket) => {
   const initialMessage: InitialElementsMessage & { files?: Record<string, ExcalidrawFile> } = {
     type: 'initial_elements',
     elements: Array.from(elements.values()),
+    project: currentProject(),
     ...(files.size > 0 ? { files: filesObj } : {})
   };
   ws.send(JSON.stringify(initialMessage));
@@ -346,6 +347,9 @@ const UpdateElementSchema = z.object({
 // The frame itself stays visible, so an agent knows not to draw there, but an agent cannot move or delete it.
 const SCRATCH_NAME = /^scratch/i;
 const isTab = (req: Request) => req.get('x-devboard-tab') === '1';
+// Every server-side write is an edit: a new versionNonce with each version, so Excalidraw's tie-break
+// (same version, lower nonce wins) stays fair between the server and the tabs.
+const freshNonce = () => Math.floor(Math.random() * 2 ** 31);
 const isScratchFrame = (e: ServerElement | undefined) => !!e && e.type === 'frame' && SCRATCH_NAME.test(String((e as any).name ?? ''));
 function scratchHidden(): Set<string> {
   const all = Array.from(elements.values());
@@ -383,10 +387,12 @@ function scratchBlock(req: Request, res: Response, id: string, write: boolean): 
 app.get('/api/elements', (req: Request, res: Response) => {
   try {
     const elementsArray = visibleTo(req, Array.from(elements.values()));
+    // The board name comes with its scene, so a tab that missed a switch never merges into the wrong one.
     res.json({
       success: true,
       elements: elementsArray,
-      count: elementsArray.length
+      count: elementsArray.length,
+      project: currentProject()
     });
   } catch (error) {
     logger.error('Error fetching elements:', error);
@@ -411,7 +417,8 @@ app.post('/api/elements', (req: Request, res: Response) => {
       fontFamily: normalizeFontFamily(params.fontFamily),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      version: 1
+      version: 1,
+      versionNonce: freshNonce()
     };
 
     // Resolve arrow bindings against existing elements
@@ -469,7 +476,8 @@ app.put('/api/elements/:id', (req: Request, res: Response) => {
       ...updates,
       fontFamily: updates.fontFamily !== undefined ? normalizeFontFamily(updates.fontFamily) : existingElement.fontFamily,
       updatedAt: new Date().toISOString(),
-      version: (existingElement.version || 0) + 1
+      version: (existingElement.version || 0) + 1,
+      versionNonce: freshNonce()
     };
 
     // Keep Excalidraw text source in sync when clients update text via REST.
@@ -819,6 +827,7 @@ function rerouteBoundArrows(movedId: string): ServerElement[] {
     resolveArrowBindings([el]);
     el.updatedAt = new Date().toISOString();
     el.version = (el.version || 0) + 1;
+    (el as any).versionNonce = freshNonce();
     rerouted.push(el);
   });
   return rerouted;
@@ -854,7 +863,8 @@ app.post('/api/elements/batch', (req: Request, res: Response) => {
         fontFamily: normalizeFontFamily(params.fontFamily),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        version: 1
+        version: 1,
+        versionNonce: freshNonce()
       };
 
       createdElements.push(element);
@@ -993,7 +1003,7 @@ app.post('/api/elements/sync', (req: Request, res: Response) => {
             syncedAt: new Date().toISOString(),
             source: 'frontend_sync',
             syncTimestamp: timestamp,
-            version: 1
+            version: element.version || 1
           };
 
           elements.set(elementId, processedElement);
@@ -1033,6 +1043,52 @@ app.post('/api/elements/sync', (req: Request, res: Response) => {
       error: (error as Error).message,
       details: 'Internal server error during sync operation'
     });
+  }
+});
+
+// Merge push from a tab: only the shapes it changed, deletes included (isDeleted). Excalidraw's rule
+// picks the winner per shape: the higher version, then the lower versionNonce. The same push sent twice
+// is a no-op, so a tab can retry after a lost reply. The losers come back so the tab can take them.
+app.post('/api/elements/push', (req: Request, res: Response) => {
+  try {
+    const forProject = req.header('x-canvas-project');
+    if (PROJECTS_DIR && CURRENT_FILE && forProject && forProject !== currentProject()) {
+      return res.status(409).json({ success: false, error: 'project_changed', current: currentProject() });
+    }
+    const incoming = req.body?.elements;
+    if (!Array.isArray(incoming) || incoming.some((e: any) => !e || typeof e.id !== 'string' || !Number.isFinite(e.version))) {
+      return res.status(400).json({ success: false, error: 'Expected elements with id and version' });
+    }
+    const applied: { id: string; version: number; versionNonce: number }[] = [];
+    const rejected: ServerElement[] = [];
+    const changed: ServerElement[] = [];
+    commitCanvasMutation(() => {
+      for (const el of incoming) {
+        const cur = elements.get(el.id) as any;
+        const nonce = (e: any) => e.versionNonce ?? 0;
+        const same = cur && cur.version === el.version && nonce(cur) === nonce(el);
+        const wins = !cur || el.version > cur.version || (el.version === cur.version && nonce(el) < nonce(cur));
+        if (!same && !wins) { rejected.push(cur); continue; }
+        applied.push({ id: el.id, version: el.version, versionNonce: el.versionNonce });
+        if (same) continue;
+        if (el.isDeleted) {
+          if (cur) { elements.delete(el.id); changed.push(el); }
+          continue;
+        }
+        const next: ServerElement = { ...el, syncedAt: new Date().toISOString(), source: 'frontend_push' };
+        elements.set(el.id, next);
+        changed.push(next);
+        // A real label now exists: the container drops its skeleton label, or the next load makes it twice.
+        const box = el.type === 'text' && el.containerId ? elements.get(el.containerId) as any : undefined;
+        if (box?.label) { const { label: _label, ...rest } = box; elements.set(box.id, rest); changed.push(rest); }
+      }
+    });
+    // Deletes go out as the deleted element, so each tab can weigh its version like any edit.
+    if (changed.length) broadcast({ type: 'elements_merged', elements: changed });
+    res.json({ success: true, applied, rejected });
+  } catch (error) {
+    logger.error('Push error:', error);
+    res.status(mutationErrorStatus(error, 500)).json({ success: false, error: (error as Error).message });
   }
 });
 
@@ -1145,6 +1201,7 @@ function exportViaBrowserTab(options: ExportImageBody): Promise<{ format: string
   broadcast({
     type: 'initial_elements',
     elements: Array.from(elements.values()),
+    project: currentProject(),
     ...(files.size > 0 ? { files: filesObj } : {})
   } as InitialElementsMessage & { files?: Record<string, ExcalidrawFile> });
 
@@ -1627,6 +1684,7 @@ const sendScene = () => {
   broadcast({
     type: 'initial_elements',
     elements: Array.from(elements.values()),
+    project: currentProject(),
     ...(files.size > 0 ? { files: filesObj } : {})
   } as InitialElementsMessage & { files?: Record<string, ExcalidrawFile> });
 };

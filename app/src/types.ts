@@ -181,6 +181,7 @@ export type WebSocketMessageType =
   | 'element_deleted'
   | 'elements_batch_created'
   | 'elements_synced'
+  | 'elements_merged'
   | 'sync_status'
   | 'mermaid_convert'
   | 'canvas_cleared'
@@ -192,6 +193,7 @@ export type WebSocketMessageType =
 export interface InitialElementsMessage extends WebSocketMessage {
   type: 'initial_elements';
   elements: ServerElement[];
+  project?: string;
 }
 
 export interface ElementCreatedMessage extends WebSocketMessage {

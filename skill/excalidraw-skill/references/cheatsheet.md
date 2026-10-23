@@ -153,6 +153,7 @@ Notes:
 | `GET` | `/api/elements/search?type=...` | Search with filters (exact string match + bbox) |
 | `POST` | `/api/elements/batch` | Batch create |
 | `POST` | `/api/elements/sync` | Overwrite import (clear + write) |
+| `POST` | `/api/elements/push` | Merge changed elements (`isDeleted` = delete); per id the higher `version` wins, then the lower `versionNonce`. Returns `applied` + `rejected` |
 | `POST` | `/api/elements/from-mermaid` | Mermaid conversion via frontend |
 
 ### Export

@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { VitePWA } from 'vite-plugin-pwa'
 
 // Local patch: whiteboard-marker pen. Excalidraw hard-codes its freehand options; make the line
 // steadier (less pressure thinning) and smoother (more smoothing and streamline).
@@ -14,9 +15,36 @@ const markerPen = () => ({
   },
 })
 
+// Local patch: the app opens with no network (the board comes from this browser's replica). The page
+// is network first: Cloudflare Access must still see each open, or an expired login looks like an
+// offline app. The code is precached; fonts cache on first use (the CJK sets are too big to precache).
+// /api and the WebSocket never pass the worker.
+const offlineShell = () => VitePWA({
+  registerType: 'autoUpdate',
+  manifest: false,
+  workbox: {
+    globPatterns: ['**/*.{js,css,html,svg}'],
+    maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
+    navigateFallback: null,
+    cleanupOutdatedCaches: true,
+    runtimeCaching: [
+      {
+        urlPattern: ({ request }) => request.mode === 'navigate',
+        handler: 'NetworkFirst',
+        options: { cacheName: 'pages', networkTimeoutSeconds: 4, precacheFallback: { fallbackURL: 'index.html' } },
+      },
+      {
+        urlPattern: ({ url }) => url.pathname.endsWith('.woff2'),
+        handler: 'CacheFirst',
+        options: { cacheName: 'fonts', expiration: { maxEntries: 400 } },
+      },
+    ],
+  },
+})
+
 export default defineConfig({
   root: 'frontend',
-  plugins: [react(), markerPen()],
+  plugins: [react(), markerPen(), offlineShell()],
   build: {
     outDir: '../dist/frontend',
     emptyOutDir: true,
