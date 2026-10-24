@@ -1,34 +1,37 @@
-import { useState, useEffect, useRef } from 'react'
 import {
-  Excalidraw,
-  convertToExcalidrawElements,
   CaptureUpdateAction,
+  convertToExcalidrawElements,
+  Excalidraw,
+  elementsOverlappingBBox,
   exportToBlob,
   exportToSvg,
-  elementsOverlappingBBox,
-  useHandleLibrary,
   newElementWith,
-  reconcileElements
+  reconcileElements,
+  useHandleLibrary,
 } from '@excalidraw/excalidraw'
+import type { LibraryPersistedData, LibraryPersistenceAdapter } from '@excalidraw/excalidraw/data/library'
 import type { ExcalidrawElement, ExcalidrawFrameLikeElement, NonDeleted } from '@excalidraw/excalidraw/element/types'
-import type { AppState, BinaryFileData, ExcalidrawImperativeAPI, LibraryItems, SceneData } from '@excalidraw/excalidraw/types'
 import type {
-  LibraryPersistedData,
-  LibraryPersistenceAdapter
-} from '@excalidraw/excalidraw/data/library'
-import { convertMermaidToExcalidraw, DEFAULT_MERMAID_CONFIG } from './utils/mermaidConverter'
-import { cleanElementForExcalidraw, prepareServerScene, assertScenePreserved } from './utils/scene'
-import { preloadCanvasFonts } from './utils/fonts'
-import { IconPanel } from './IconPanel'
-import { SelectionDelete } from './SelectionDelete'
-import { Notify } from './Notify'
-import { Scratch, withoutScratch } from './Scratch'
-import { Projects } from './Projects'
-import { Eraser, Shapes } from 'lucide-react'
-import { Voice } from './Voice'
-import { StrokeWidth } from './StrokeWidth'
-import type { ServerElement } from './utils/scene'
+  AppState,
+  BinaryFileData,
+  ExcalidrawImperativeAPI,
+  LibraryItems,
+  SceneData,
+} from '@excalidraw/excalidraw/types'
 import type { MermaidConfig } from '@excalidraw/mermaid-to-excalidraw'
+import { Eraser, Shapes } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { IconPanel } from './IconPanel'
+import { Notify } from './Notify'
+import { Projects } from './Projects'
+import { Scratch, withoutScratch } from './Scratch'
+import { SelectionDelete } from './SelectionDelete'
+import { StrokeWidth } from './StrokeWidth'
+import { preloadCanvasFonts } from './utils/fonts'
+import { convertMermaidToExcalidraw, DEFAULT_MERMAID_CONFIG } from './utils/mermaidConverter'
+import type { ServerElement } from './utils/scene'
+import { assertScenePreserved, cleanElementForExcalidraw, prepareServerScene } from './utils/scene'
+import { Voice } from './Voice'
 
 // Local patch: marks the canvas tab, so the server shows it scratch areas (agents get them hidden).
 const TAB = { 'x-devboard-tab': '1' }
@@ -46,12 +49,13 @@ const LIBRARY_STORAGE_KEY = 'excalidraw-canvas-library'
  */
 // Local patch: IndexedDB, not localStorage. Safari's 5MB localStorage quota can't hold a big icon pack.
 // Reads the old localStorage copy once, if there is one.
-const libraryDb = (): Promise<IDBDatabase> => new Promise((resolve, reject) => {
-  const req = indexedDB.open('excalidraw-canvas', 1)
-  req.onupgradeneeded = () => req.result.createObjectStore('kv')
-  req.onsuccess = () => resolve(req.result)
-  req.onerror = () => reject(req.error)
-})
+const libraryDb = (): Promise<IDBDatabase> =>
+  new Promise((resolve, reject) => {
+    const req = indexedDB.open('excalidraw-canvas', 1)
+    req.onupgradeneeded = () => req.result.createObjectStore('kv')
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
 const libraryAdapter: LibraryPersistenceAdapter = {
   load: async () => {
     try {
@@ -65,7 +69,9 @@ const libraryAdapter: LibraryPersistenceAdapter = {
       const raw = window.localStorage?.getItem(LIBRARY_STORAGE_KEY)
       if (raw) return { libraryItems: JSON.parse(raw) }
       // First visit: start with the canvas's own pack (brand logos, system design, stickies).
-      const pack = await fetch('/lib/wren.excalidrawlib').then(r => (r.ok ? r.json() : null)).catch(() => null)
+      const pack = await fetch('/lib/wren.excalidrawlib')
+        .then(r => (r.ok ? r.json() : null))
+        .catch(() => null)
       if (!pack?.libraryItems) return null
       await libraryAdapter.save({ libraryItems: pack.libraryItems })
       return { libraryItems: pack.libraryItems }
@@ -87,9 +93,8 @@ const libraryAdapter: LibraryPersistenceAdapter = {
     } catch (error) {
       console.warn('Failed to save library:', error)
     }
-  }
+  },
 }
-
 
 // Local patch: offline first. Each board has a replica in this browser: its elements and, per element,
 // the version the Mac last confirmed (acked). An element whose version differs from its ack is pending:
@@ -99,8 +104,20 @@ const replicaKey = (project: string) => `replica:${project}`
 const stamp = (el: { version?: number; versionNonce?: number }) => `${el.version}:${el.versionNonce ?? 0}`
 // The board to open from the replica when the Mac can't be reached.
 const LAST_PROJECT_KEY = 'canvas-last-project'
-const lastProject = () => { try { return window.localStorage?.getItem(LAST_PROJECT_KEY) ?? null } catch { return null } }
-const rememberProject = (p: string) => { try { window.localStorage?.setItem(LAST_PROJECT_KEY, p) } catch { /* private mode */ } }
+const lastProject = () => {
+  try {
+    return window.localStorage?.getItem(LAST_PROJECT_KEY) ?? null
+  } catch {
+    return null
+  }
+}
+const rememberProject = (p: string) => {
+  try {
+    window.localStorage?.setItem(LAST_PROJECT_KEY, p)
+  } catch {
+    /* private mode */
+  }
+}
 const idb = async <T,>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> => {
   const db = await libraryDb()
   return new Promise<T>((resolve, reject) => {
@@ -109,11 +126,14 @@ const idb = async <T,>(mode: IDBTransactionMode, run: (store: IDBObjectStore) =>
     req.onerror = () => reject(req.error)
   })
 }
-const readReplica = (project: string) => idb<Replica | undefined>('readonly', st => st.get(replicaKey(project))).catch(() => undefined)
-const writeReplica = (project: string, r: Replica) => idb('readwrite', st => st.put(r, replicaKey(project))).catch(() => undefined)
+const readReplica = (project: string) =>
+  idb<Replica | undefined>('readonly', st => st.get(replicaKey(project))).catch(() => undefined)
+const writeReplica = (project: string, r: Replica) =>
+  idb('readwrite', st => st.put(r, replicaKey(project))).catch(() => undefined)
 const dropReplica = (project: string) => idb('readwrite', st => st.delete(replicaKey(project))).catch(() => undefined)
 // Image data once per file, apart from the replica: it never changes, and it is the bulk of the bytes.
-const readFile = (id: string) => idb<BinaryFileData | undefined>('readonly', st => st.get(`file:${id}`)).catch(() => undefined)
+const readFile = (id: string) =>
+  idb<BinaryFileData | undefined>('readonly', st => st.get(`file:${id}`)).catch(() => undefined)
 const writeFile = (f: BinaryFileData) => idb('readwrite', st => st.put(f, `file:${f.id}`)).catch(() => undefined)
 // The server's files: a map by id (a scene) or a list (files_added); the canvas wants the map.
 type ServerFiles = Record<string, BinaryFileData>
@@ -128,72 +148,83 @@ async function postThumb(api: ExcalidrawImperativeAPI, project: string) {
   const elements = withoutScratch(api.getSceneElements())
   if (!elements.length) return
   const blob = await exportToBlob({
-    elements, files: api.getFiles(), maxWidthOrHeight: 480, mimeType: 'image/png',
+    elements,
+    files: api.getFiles(),
+    maxWidthOrHeight: 480,
+    mimeType: 'image/png',
     appState: { ...api.getAppState(), exportBackground: true, exportWithDarkMode: false },
   })
-  await fetch('/api/projects/thumb', { method: 'POST', headers: { 'content-type': 'image/png', 'x-devboard-tab': '1', 'x-canvas-project': project }, body: blob })
+  await fetch('/api/projects/thumb', {
+    method: 'POST',
+    headers: { 'content-type': 'image/png', 'x-devboard-tab': '1', 'x-canvas-project': project },
+    body: blob,
+  })
 }
 
 // Type definitions
-type ExcalidrawAPIRefValue = ExcalidrawImperativeAPI;
+type ExcalidrawAPIRefValue = ExcalidrawImperativeAPI
 
 interface ExportImageOptions {
-  background?: boolean;
-  dark?: boolean;
-  scale?: number;
-  padding?: number;
-  elementIds?: string[];
-  frameId?: string;
-  area?: { x: number; y: number; w: number; h: number };
-  hide?: string[];
-  embedScene?: boolean;
+  background?: boolean
+  dark?: boolean
+  scale?: number
+  padding?: number
+  elementIds?: string[]
+  frameId?: string
+  area?: { x: number; y: number; w: number; h: number }
+  hide?: string[]
+  embedScene?: boolean
 }
 
 interface WebSocketMessage {
-  type: string;
-  format?: 'png' | 'svg';
-  background?: boolean;
-  options?: ExportImageOptions;
-  element?: ServerElement;
-  elements?: ServerElement[];
-  elementId?: string;
-  files?: ServerFiles | BinaryFileData[];
-  fileId?: string;
-  project?: string;
-  from?: string;
-  to?: string;
-  count?: number;
-  timestamp?: string;
-  source?: string;
-  mermaidDiagram?: string;
-  config?: MermaidConfig;
-  requestId?: string;
-  scrollToContent?: boolean;
-  scrollToElementId?: string;
-  scrollToElementIds?: string[];
-  viewportZoomFactor?: number;
-  zoom?: number;
-  offsetX?: number;
-  offsetY?: number;
+  type: string
+  format?: 'png' | 'svg'
+  background?: boolean
+  options?: ExportImageOptions
+  element?: ServerElement
+  elements?: ServerElement[]
+  elementId?: string
+  files?: ServerFiles | BinaryFileData[]
+  fileId?: string
+  project?: string
+  from?: string
+  to?: string
+  count?: number
+  timestamp?: string
+  source?: string
+  mermaidDiagram?: string
+  config?: MermaidConfig
+  requestId?: string
+  scrollToContent?: boolean
+  scrollToElementId?: string
+  scrollToElementIds?: string[]
+  viewportZoomFactor?: number
+  zoom?: number
+  offsetX?: number
+  offsetY?: number
 }
 
 interface ApiResponse {
-  success: boolean;
-  elements?: ServerElement[];
-  element?: ServerElement;
-  files?: ServerFiles;
-  project?: string;
-  count?: number;
-  error?: string;
-  message?: string;
+  success: boolean
+  elements?: ServerElement[]
+  element?: ServerElement
+  files?: ServerFiles
+  project?: string
+  count?: number
+  error?: string
+  message?: string
 }
 
-type SyncStatus = 'idle' | 'syncing' | 'success' | 'error';
-type SceneLoadStatus = 'loading' | 'ready' | 'failed';
-const AUTO_SYNC_DEBOUNCE_MS = 1200;
+type SyncStatus = 'idle' | 'syncing' | 'success' | 'error'
+type SceneLoadStatus = 'loading' | 'ready' | 'failed'
+const AUTO_SYNC_DEBOUNCE_MS = 1200
 const SCENE_MUTATIONS = new Set([
-  'element_created', 'element_updated', 'element_deleted', 'elements_batch_created', 'elements_merged'
-]);
+  'element_created',
+  'element_updated',
+  'element_deleted',
+  'elements_batch_created',
+  'elements_merged',
+])
 
 function App(): JSX.Element {
   const [excalidrawAPI, setExcalidrawAPI] = useState<ExcalidrawAPIRefValue | null>(null)
@@ -212,10 +243,12 @@ function App(): JSX.Element {
   useHandleLibrary({
     excalidrawAPI,
     adapter: libraryAdapter,
-    validateLibraryUrl: (url) => {
+    validateLibraryUrl: url => {
       const u = new URL(url, window.location.href)
-      return u.origin === window.location.origin ||
+      return (
+        u.origin === window.location.origin ||
         ['libraries.excalidraw.com', 'raw.githubusercontent.com'].includes(u.hostname)
+      )
     },
   })
   const [isConnected, setIsConnected] = useState<boolean>(false)
@@ -225,17 +258,25 @@ function App(): JSX.Element {
   const sceneProjectRef = useRef<string | null>(null)
   const thumbAtRef = useRef(0)
   const saveThumb = async () => {
-    const api = excalidrawAPIRef.current, project = sceneProjectRef.current
+    const api = excalidrawAPIRef.current,
+      project = sceneProjectRef.current
     if (api && project) await postThumb(api, project).catch(() => {})
   }
   // The thumbnail renders the whole board on the main thread (~0.2s on 400 strokes): wait until the pen is up.
   const penDownRef = useRef(false)
-  const thumbSoon = (): void => { setTimeout(() => (penDownRef.current ? thumbSoon() : void saveThumb()), 1500) }
+  const thumbSoon = (): void => {
+    setTimeout(() => (penDownRef.current ? thumbSoon() : void saveThumb()), 1500)
+  }
   useEffect(() => {
-    const up = () => { penDownRef.current = false }
+    const up = () => {
+      penDownRef.current = false
+    }
     window.addEventListener('pointerup', up)
     window.addEventListener('pointercancel', up)
-    return () => { window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up) }
+    return () => {
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+    }
   }, [])
   // Per element of the scene's board: the version the Mac confirmed. See Replica.
   const ackedRef = useRef<Map<string, string>>(new Map())
@@ -247,10 +288,20 @@ function App(): JSX.Element {
   const loadedOnceRef = useRef<boolean>(false)
   const [iconsOpen, setIconsOpen] = useState(false)
   useEffect(() => {
-    fetch('/api/projects').then(r => (r.ok ? r.json() : null)).then(d => {
-      if (d && !projectRef.current) { projectRef.current = d.current; rememberProject(d.current) }
-    }).catch(() => {})
-    const onProject = (e: Event) => { const project = (e as CustomEvent<string>).detail; projectRef.current = project; rememberProject(project) }
+    fetch('/api/projects')
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => {
+        if (d && !projectRef.current) {
+          projectRef.current = d.current
+          rememberProject(d.current)
+        }
+      })
+      .catch(() => {})
+    const onProject = (e: Event) => {
+      const project = (e as CustomEvent<string>).detail
+      projectRef.current = project
+      rememberProject(project)
+    }
     window.addEventListener('canvas-project', onProject)
     return () => window.removeEventListener('canvas-project', onProject)
   }, [])
@@ -315,7 +366,11 @@ function App(): JSX.Element {
 
   const applySceneUpdateWithoutAutoSync = <K extends keyof AppState>(
     api: ExcalidrawImperativeAPI,
-    scene: { elements?: SceneData['elements']; appState?: Pick<AppState, K> | null; captureUpdate?: SceneData['captureUpdate'] }
+    scene: {
+      elements?: SceneData['elements']
+      appState?: Pick<AppState, K> | null
+      captureUpdate?: SceneData['captureUpdate']
+    },
   ): void => {
     suppressAutoSyncCountRef.current += 1
     try {
@@ -329,7 +384,8 @@ function App(): JSX.Element {
 
   // Write the scene's board to its replica: every live element, and deletes the Mac has not confirmed.
   const saveReplicaNow = (force = false): void => {
-    const api = excalidrawAPIRef.current, project = sceneProjectRef.current
+    const api = excalidrawAPIRef.current,
+      project = sceneProjectRef.current
     if (!api || !project || !loadedOnceRef.current) return
     const all = api.getSceneElementsIncludingDeleted()
     const version = sceneVersion(all)
@@ -341,7 +397,10 @@ function App(): JSX.Element {
       acked: Object.fromEntries(ackedRef.current),
     })
     for (const f of Object.values(api.getFiles())) {
-      if (!storedFilesRef.current.has(f.id)) { storedFilesRef.current.add(f.id); void writeFile(f) }
+      if (!storedFilesRef.current.has(f.id)) {
+        storedFilesRef.current.add(f.id)
+        void writeFile(f)
+      }
     }
   }
   // Same main-thread rule as the thumbnail: write while the pen is up.
@@ -349,19 +408,31 @@ function App(): JSX.Element {
     if (replicaTimerRef.current) return
     replicaTimerRef.current = setTimeout(() => {
       replicaTimerRef.current = null
-      if (penDownRef.current) replicaSoon(); else saveReplicaNow()
+      if (penDownRef.current) replicaSoon()
+      else saveReplicaNow()
     }, 400)
   }
   // The board the Mac has open. Offline, the last board this browser showed.
   const resolveProject = async (): Promise<string | null> => {
     if (!projectRef.current) {
-      const p = await fetch('/api/projects').then(r => (r.ok ? r.json() : null)).catch(() => null)
-      if (p && !projectRef.current) { projectRef.current = p.current; rememberProject(p.current) }
+      const p = await fetch('/api/projects')
+        .then(r => (r.ok ? r.json() : null))
+        .catch(() => null)
+      if (p && !projectRef.current) {
+        projectRef.current = p.current
+        rememberProject(p.current)
+      }
     }
     return projectRef.current
   }
-  const addStoredFiles = async (api: ExcalidrawImperativeAPI, els: readonly ExcalidrawElement[], have: ServerFiles = {}): Promise<void> => {
-    const ids = [...new Set(els.flatMap(el => (el.type === 'image' && el.fileId && !have[el.fileId] ? [el.fileId] : [])))]
+  const addStoredFiles = async (
+    api: ExcalidrawImperativeAPI,
+    els: readonly ExcalidrawElement[],
+    have: ServerFiles = {},
+  ): Promise<void> => {
+    const ids = [
+      ...new Set(els.flatMap(el => (el.type === 'image' && el.fileId && !have[el.fileId] ? [el.fileId] : []))),
+    ]
     const found = (await Promise.all(ids.map(readFile))).filter((f): f is BinaryFileData => !!f)
     if (found.length) api.addFiles(found)
   }
@@ -388,7 +459,10 @@ function App(): JSX.Element {
   // there, so it goes. The base is the scene on screen only when it shows the same board; else that
   // board's replica, so one board's shapes never reach another.
   const applyLoadedScene = async (
-    incoming: readonly Partial<ExcalidrawElement>[], generation: number, files?: ServerFiles, board?: string
+    incoming: readonly Partial<ExcalidrawElement>[],
+    generation: number,
+    files?: ServerFiles,
+    board?: string,
   ): Promise<void> => {
     if (board && board !== projectRef.current) {
       projectRef.current = board
@@ -402,12 +476,16 @@ function App(): JSX.Element {
     const replica = same || !project ? undefined : await readReplica(project)
     if (generation !== sceneGenerationRef.current) return
     const acked = same ? ackedRef.current : new Map(Object.entries(replica?.acked ?? {}))
-    const base: readonly ExcalidrawElement[] = same ? api.getSceneElementsIncludingDeleted() : replica?.elements ?? []
+    const base: readonly ExcalidrawElement[] = same ? api.getSceneElementsIncludingDeleted() : (replica?.elements ?? [])
     const local = base.filter(el => acked.get(el.id) !== stamp(el))
     const prepared = prepareServerScene(incoming)
     // reconcileElements wants fractional indexes and a brand on the remote side; both sides are full elements here.
     const merged: readonly ExcalidrawElement[] = local.length
-      ? reconcileElements(local as Parameters<typeof reconcileElements>[0], prepared as unknown as Parameters<typeof reconcileElements>[1], api.getAppState())
+      ? reconcileElements(
+          local as Parameters<typeof reconcileElements>[0],
+          prepared as unknown as Parameters<typeof reconcileElements>[1],
+          api.getAppState(),
+        )
       : prepared
     // Acked: what the Mac holds. Labels made here from an agent's shape are not on the Mac yet: they go up.
     const fromMac = new Map(incoming.map(el => [el.id, stamp(el)]))
@@ -466,30 +544,31 @@ function App(): JSX.Element {
     incoming: readonly Partial<ExcalidrawElement>[],
     generation: number,
     files?: ServerFiles,
-    opts: { refreshDimensions?: boolean } = {}
+    opts: { refreshDimensions?: boolean } = {},
   ): void => {
     showScene(prepareServerScene(incoming, opts), generation, files)
   }
 
   // Replace the visible scene with a prepared one. restoreElements() can silently filter elements,
   // so the API readback is checked. Deletes this browser has not pushed yet stay in the scene.
-  const showScene = (
-    prepared: readonly ExcalidrawElement[],
-    generation: number,
-    files?: ServerFiles
-  ): void => {
+  const showScene = (prepared: readonly ExcalidrawElement[], generation: number, files?: ServerFiles): void => {
     const api = excalidrawAPIRef.current
     if (!api || generation !== sceneGenerationRef.current) return
     const previous = api.getSceneElementsIncludingDeleted()
     const ids = new Set(prepared.map(el => el.id))
-    const unsentDeletes = sceneProjectRef.current === projectRef.current
-      ? previous.filter(el => el.isDeleted && !ids.has(el.id) && isPending(el)) : []
+    const unsentDeletes =
+      sceneProjectRef.current === projectRef.current
+        ? previous.filter(el => el.isDeleted && !ids.has(el.id) && isPending(el))
+        : []
     try {
       if (files) {
         api.addFiles(Object.values(files))
         rememberServerFiles(files)
       }
-      applySceneUpdateWithoutAutoSync(api, { elements: [...prepared, ...unsentDeletes], captureUpdate: CaptureUpdateAction.NEVER })
+      applySceneUpdateWithoutAutoSync(api, {
+        elements: [...prepared, ...unsentDeletes],
+        captureUpdate: CaptureUpdateAction.NEVER,
+      })
       assertScenePreserved(prepared, api.getSceneElements())
     } catch (error) {
       applySceneUpdateWithoutAutoSync(api, { elements: previous, captureUpdate: CaptureUpdateAction.NEVER })
@@ -519,7 +598,10 @@ function App(): JSX.Element {
       const id = el.id
       if (!id) continue
       const cur = current.get(id)
-      if (cur && stamp(cur) === stamp(el)) { ackedRef.current.set(cur.id, stamp(cur)); continue }
+      if (cur && stamp(cur) === stamp(el)) {
+        ackedRef.current.set(cur.id, stamp(cur))
+        continue
+      }
       if (cur && isPending(cur) && !newer(el, cur)) continue
       if (!cur && el.isDeleted) continue
       take.set(id, el)
@@ -529,7 +611,10 @@ function App(): JSX.Element {
     const next: Partial<ExcalidrawElement>[] = []
     for (const el of api.getSceneElements()) {
       const inc = take.get(el.id)
-      if (!inc) { next.push(el); continue }
+      if (!inc) {
+        next.push(el)
+        continue
+      }
       take.delete(el.id)
       if (!inc.isDeleted) next.push({ ...el, ...inc })
     }
@@ -617,14 +702,19 @@ function App(): JSX.Element {
         throw new Error(result.error || 'Invalid scene response')
       }
       const filesResponse = await fetch('/api/files', { signal: AbortSignal.timeout(10000) })
-      const filesResult = await filesResponse.json() as ApiResponse
+      const filesResult = (await filesResponse.json()) as ApiResponse
       if (generation !== sceneGenerationRef.current) return
       if (!filesResponse.ok || !filesResult.files) {
         throw new Error('Could not load scene files')
       }
       await preloadCanvasFonts()
       if (generation !== sceneGenerationRef.current) return
-      await applyLoadedScene(result.elements.map(cleanElementForExcalidraw), generation, filesResult.files, result.project)
+      await applyLoadedScene(
+        result.elements.map(cleanElementForExcalidraw),
+        generation,
+        filesResult.files,
+        result.project,
+      )
     } catch (error) {
       failSceneLoad(error, generation)
     }
@@ -634,9 +724,10 @@ function App(): JSX.Element {
     // Guard CONNECTING too: the mount effect and the excalidrawAPI effect can
     // both run before the first socket opens, orphaning a live duplicate
     // connection whose handlers then process every broadcast twice.
-    if (websocketRef.current &&
-        (websocketRef.current.readyState === WebSocket.CONNECTING ||
-         websocketRef.current.readyState === WebSocket.OPEN)) {
+    if (
+      websocketRef.current &&
+      (websocketRef.current.readyState === WebSocket.CONNECTING || websocketRef.current.readyState === WebSocket.OPEN)
+    ) {
       return
     }
 
@@ -706,7 +797,12 @@ function App(): JSX.Element {
             // Measure the first scene with the real fonts, not a fallback
             await preloadCanvasFonts()
             if (generation !== sceneGenerationRef.current) return
-            await applyLoadedScene(data.elements.map(cleanElementForExcalidraw), generation, asFileMap(data.files), data.project)
+            await applyLoadedScene(
+              data.elements.map(cleanElementForExcalidraw),
+              generation,
+              asFileMap(data.files),
+              data.project,
+            )
           }
           break
 
@@ -774,7 +870,10 @@ function App(): JSX.Element {
         case 'project_opened':
           // Edits for the old project that never reached the Mac stay in its replica.
           saveReplicaNow(true)
-          if (autoSyncTimerRef.current) { clearTimeout(autoSyncTimerRef.current); autoSyncTimerRef.current = null }
+          if (autoSyncTimerRef.current) {
+            clearTimeout(autoSyncTimerRef.current)
+            autoSyncTimerRef.current = null
+          }
           projectRef.current = data.project ?? null
           if (data.project) rememberProject(data.project)
           setSceneShown(false)
@@ -814,23 +913,43 @@ function App(): JSX.Element {
               const allElements = excalidrawAPI.getSceneElements().filter(el => !hide.has(el.id))
               const wanted = opts.elementIds ? new Set(opts.elementIds) : null
               const elements = wanted
-                ? allElements.filter(el => wanted.has(el.id) || (el.type === 'text' && el.containerId && wanted.has(el.containerId)))
+                ? allElements.filter(
+                    el => wanted.has(el.id) || (el.type === 'text' && el.containerId && wanted.has(el.containerId)),
+                  )
                 : allElements
-              const isFrame = (el: NonDeleted<ExcalidrawElement>): el is NonDeleted<ExcalidrawFrameLikeElement> => el.type === 'frame' || el.type === 'magicframe'
+              const isFrame = (el: NonDeleted<ExcalidrawElement>): el is NonDeleted<ExcalidrawFrameLikeElement> =>
+                el.type === 'frame' || el.type === 'magicframe'
               const exportingFrame: ExcalidrawFrameLikeElement | null = opts.frameId
-                ? allElements.find(el => el.id === opts.frameId && isFrame(el)) as NonDeleted<ExcalidrawFrameLikeElement> | undefined ?? null
+                ? ((allElements.find(el => el.id === opts.frameId && isFrame(el)) as
+                    | NonDeleted<ExcalidrawFrameLikeElement>
+                    | undefined) ?? null)
                 : opts.area // Local patch: a marked area crops like a frame that is not in the scene.
-                  ? { id: '__area', type: 'frame', x: opts.area.x, y: opts.area.y, width: opts.area.w, height: opts.area.h, angle: 0, name: null, groupIds: [], frameId: null, isDeleted: false } as unknown as ExcalidrawFrameLikeElement
+                  ? ({
+                      id: '__area',
+                      type: 'frame',
+                      x: opts.area.x,
+                      y: opts.area.y,
+                      width: opts.area.w,
+                      height: opts.area.h,
+                      angle: 0,
+                      name: null,
+                      groupIds: [],
+                      frameId: null,
+                      isDeleted: false,
+                    } as unknown as ExcalidrawFrameLikeElement)
                   : null
               if (opts.frameId && !exportingFrame) throw new Error(`Unknown frame id: ${opts.frameId}`)
-              let exportElements = embedScene && exportingFrame
-                ? elementsOverlappingBBox({ elements, bounds: exportingFrame, type: 'overlap' })
-                  .filter((el: ExcalidrawElement) => !el.frameId || el.frameId === exportingFrame.id)
-                : elements
+              let exportElements =
+                embedScene && exportingFrame
+                  ? elementsOverlappingBBox({ elements, bounds: exportingFrame, type: 'overlap' }).filter(
+                      (el: ExcalidrawElement) => !el.frameId || el.frameId === exportingFrame.id,
+                    )
+                  : elements
               if (embedScene) {
                 const exportedIds = new Set(exportElements.map((el: ExcalidrawElement) => el.id))
                 exportElements = exportElements.map((el: ExcalidrawElement) =>
-                  el.frameId && !exportedIds.has(el.frameId) ? { ...el, frameId: null } : el)
+                  el.frameId && !exportedIds.has(el.frameId) ? { ...el, frameId: null } : el,
+                )
               }
               const appState = excalidrawAPI.getAppState()
               const exportAppState = {
@@ -838,7 +957,7 @@ function App(): JSX.Element {
                 exportBackground: data.background !== false,
                 exportEmbedScene: embedScene,
                 ...(opts.dark !== undefined ? { exportWithDarkMode: opts.dark } : {}),
-                exportScale: opts.scale ?? 1
+                exportScale: opts.scale ?? 1,
               }
               const files = excalidrawAPI.getFiles()
 
@@ -848,7 +967,7 @@ function App(): JSX.Element {
                   appState: exportAppState,
                   files,
                   exportPadding: opts.padding,
-                  exportingFrame
+                  exportingFrame,
                 })
                 const svgString = new XMLSerializer().serializeToString(svg)
                 await fetch('/api/export/image/result', {
@@ -857,8 +976,8 @@ function App(): JSX.Element {
                   body: JSON.stringify({
                     requestId: data.requestId,
                     format: 'svg',
-                    data: svgString
-                  })
+                    data: svgString,
+                  }),
                 })
               } else {
                 const blob = await exportToBlob({
@@ -867,7 +986,7 @@ function App(): JSX.Element {
                   files,
                   mimeType: 'image/png',
                   exportPadding: opts.padding,
-                  exportingFrame
+                  exportingFrame,
                 })
                 const reader = new FileReader()
                 reader.onload = async () => {
@@ -883,8 +1002,8 @@ function App(): JSX.Element {
                       body: JSON.stringify({
                         requestId: data.requestId,
                         format: 'png',
-                        data: base64
-                      })
+                        data: base64,
+                      }),
                     })
                   } catch (readerError) {
                     console.error('Image export (FileReader) failed:', readerError)
@@ -893,9 +1012,9 @@ function App(): JSX.Element {
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({
                         requestId: data.requestId,
-                        error: (readerError as Error).message
-                      })
-                    }).catch(() => { })
+                        error: (readerError as Error).message,
+                      }),
+                    }).catch(() => {})
                   }
                 }
                 reader.onerror = async () => {
@@ -905,9 +1024,9 @@ function App(): JSX.Element {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                       requestId: data.requestId,
-                      error: reader.error?.message || 'FileReader failed'
-                    })
-                  }).catch(() => { })
+                      error: reader.error?.message || 'FileReader failed',
+                    }),
+                  }).catch(() => {})
                 }
                 reader.readAsDataURL(blob)
               }
@@ -918,8 +1037,8 @@ function App(): JSX.Element {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   requestId: data.requestId,
-                  error: (exportError as Error).message
-                })
+                  error: (exportError as Error).message,
+                }),
               })
             }
           }
@@ -935,13 +1054,15 @@ function App(): JSX.Element {
                   excalidrawAPI.scrollToContent(allElements, {
                     fitToViewport: true,
                     viewportZoomFactor: data.viewportZoomFactor,
-                    animate: true
+                    animate: true,
                   })
                 }
               } else if (data.scrollToElementIds !== undefined) {
-                if (!Array.isArray(data.scrollToElementIds) ||
-                    data.scrollToElementIds.length === 0 ||
-                    !data.scrollToElementIds.every(id => typeof id === 'string' && id.length > 0)) {
+                if (
+                  !Array.isArray(data.scrollToElementIds) ||
+                  data.scrollToElementIds.length === 0 ||
+                  !data.scrollToElementIds.every(id => typeof id === 'string' && id.length > 0)
+                ) {
                   throw new Error('scrollToElementIds must be a non-empty array of element IDs')
                 }
                 const allElements = excalidrawAPI.getSceneElements()
@@ -955,7 +1076,7 @@ function App(): JSX.Element {
                 excalidrawAPI.scrollToContent(targetElements, {
                   fitToViewport: true,
                   viewportZoomFactor: data.viewportZoomFactor,
-                  animate: true
+                  animate: true,
                 })
               } else if (data.scrollToElementId) {
                 const allElements = excalidrawAPI.getSceneElements()
@@ -984,8 +1105,8 @@ function App(): JSX.Element {
                 body: JSON.stringify({
                   requestId: data.requestId,
                   success: true,
-                  message: 'Viewport updated'
-                })
+                  message: 'Viewport updated',
+                }),
               })
             } catch (viewportError) {
               console.error('Viewport control failed:', viewportError)
@@ -994,9 +1115,9 @@ function App(): JSX.Element {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   requestId: data.requestId,
-                  error: (viewportError as Error).message
-                })
-              }).catch(() => { })
+                  error: (viewportError as Error).message,
+                }),
+              }).catch(() => {})
             }
           }
           break
@@ -1007,7 +1128,10 @@ function App(): JSX.Element {
             try {
               if (!canSyncScene()) throw new Error('Scene is not fully loaded; Mermaid import is paused')
               const generation = sceneGenerationRef.current
-              const result = await convertMermaidToExcalidraw(data.mermaidDiagram, data.config || DEFAULT_MERMAID_CONFIG)
+              const result = await convertMermaidToExcalidraw(
+                data.mermaidDiagram,
+                data.config || DEFAULT_MERMAID_CONFIG,
+              )
               if (!canSyncScene() || generation !== sceneGenerationRef.current) return
 
               if (result.error) {
@@ -1019,13 +1143,16 @@ function App(): JSX.Element {
                 // Regenerate ids so repeated conversions of the same diagram
                 // (mermaid emits stable ids like "A", "B") can't collide with
                 // elements already on the canvas.
-                const convertedElements = convertToExcalidrawElements([...result.elements] as Parameters<typeof convertToExcalidrawElements>[0], { regenerateIds: true })
+                const convertedElements = convertToExcalidrawElements(
+                  [...result.elements] as Parameters<typeof convertToExcalidrawElements>[0],
+                  { regenerateIds: true },
+                )
                 // Merge with the existing scene — updateScene() replaces the
                 // element list wholesale, and syncToBackend() would otherwise
                 // propagate that wipe to the server.
                 applySceneUpdateWithoutAutoSync(excalidrawAPI, {
                   elements: [...excalidrawAPI.getSceneElements(), ...convertedElements],
-                  captureUpdate: CaptureUpdateAction.IMMEDIATELY
+                  captureUpdate: CaptureUpdateAction.IMMEDIATELY,
                 })
 
                 if (result.files) {
@@ -1091,17 +1218,26 @@ function App(): JSX.Element {
       // them. An image element only holds a fileId; without the file the
       // server keeps a dangling reference and a reload shows a broken image.
       // One request per file keeps each body under the server's JSON limit.
-      const usedFileIds = new Set(sent.flatMap(el =>
-        el.type === 'image' && !el.isDeleted && el.fileId ? [el.fileId as string] : []))
-      const newFiles = Object.values(api.getFiles()).filter(file =>
-        usedFileIds.has(file.id) && file.dataURL && !serverFileIdsRef.current.has(file.id))
+      const usedFileIds = new Set(
+        sent.flatMap(el => (el.type === 'image' && !el.isDeleted && el.fileId ? [el.fileId as string] : [])),
+      )
+      const newFiles = Object.values(api.getFiles()).filter(
+        file => usedFileIds.has(file.id) && file.dataURL && !serverFileIdsRef.current.has(file.id),
+      )
       for (const file of newFiles) {
         const fileResponse = await fetch('/api/files', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ files: [{
-            id: file.id, dataURL: file.dataURL, mimeType: file.mimeType, created: file.created
-          }] })
+          body: JSON.stringify({
+            files: [
+              {
+                id: file.id,
+                dataURL: file.dataURL,
+                mimeType: file.mimeType,
+                created: file.created,
+              },
+            ],
+          }),
         })
         if (!fileResponse.ok) throw new Error(`Image upload failed: HTTP ${fileResponse.status}`)
         serverFileIdsRef.current.add(file.id)
@@ -1114,11 +1250,14 @@ function App(): JSX.Element {
           ...TAB,
           ...(project ? { 'x-canvas-project': project } : {}),
         },
-        body: JSON.stringify({ elements: sent })
+        body: JSON.stringify({ elements: sent }),
       })
 
       if (response.ok) {
-        const result = await response.json() as { applied: { id: string; version: number; versionNonce: number }[]; rejected: ServerElement[] }
+        const result = (await response.json()) as {
+          applied: { id: string; version: number; versionNonce: number }[]
+          rejected: ServerElement[]
+        }
         // The scene moved to another board meanwhile: its acks are not this board's.
         if (sceneProjectRef.current !== project) return
         setPushFailed(false)
@@ -1126,7 +1265,10 @@ function App(): JSX.Element {
         if (result.rejected.length) mergeRemote(result.rejected.map(cleanElementForExcalidraw))
         saveReplicaNow(true)
         // A fresh thumbnail at most once a minute while the board changes.
-        if (Date.now() - thumbAtRef.current > 60_000) { thumbAtRef.current = Date.now(); thumbSoon() }
+        if (Date.now() - thumbAtRef.current > 60_000) {
+          thumbAtRef.current = Date.now()
+          thumbSoon()
+        }
 
         if (!silent) {
           setSyncStatus('success')
@@ -1138,7 +1280,10 @@ function App(): JSX.Element {
         // events bring the right scene. Never retry into the wrong project.
         console.warn('Push refused: another project is open; edits kept on this device')
         saveReplicaNow(true)
-        if (autoSyncTimerRef.current) { clearTimeout(autoSyncTimerRef.current); autoSyncTimerRef.current = null }
+        if (autoSyncTimerRef.current) {
+          clearTimeout(autoSyncTimerRef.current)
+          autoSyncTimerRef.current = null
+        }
       } else {
         const error: ApiResponse = await response.json()
         console.error('Push failed:', error.error)
@@ -1154,7 +1299,10 @@ function App(): JSX.Element {
       }
     } finally {
       syncInFlightRef.current = false
-      if (pushAgainRef.current) { pushAgainRef.current = false; pushSoon() }
+      if (pushAgainRef.current) {
+        pushAgainRef.current = false
+        pushSoon()
+      }
     }
   }
 
@@ -1179,19 +1327,28 @@ function App(): JSX.Element {
     const api = excalidrawAPIRef.current
     if (!api || !canSyncScene()) return
     api.updateScene({
-      elements: api.getSceneElementsIncludingDeleted().map(el => (el.isDeleted ? el : newElementWith(el, { isDeleted: true }))),
+      elements: api
+        .getSceneElementsIncludingDeleted()
+        .map(el => (el.isDeleted ? el : newElementWith(el, { isDeleted: true }))),
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     })
     void syncToBackend({ silent: true })
   }
-
 
   return (
     <div className="app" data-theme={theme}>
       {/* Header */}
       <div className="header">
         <Projects beforeSwitch={() => syncToBackend({ silent: true })} saveThumb={saveThumb} />
-        <button type="button" className={`btn-secondary icons-toggle ${iconsOpen ? 'on' : ''}`} onClick={() => setIconsOpen(o => !o)} aria-label="Icons"><Shapes size={17} /><span className="hb-word">Icons</span></button>
+        <button
+          type="button"
+          className={`btn-secondary icons-toggle ${iconsOpen ? 'on' : ''}`}
+          onClick={() => setIconsOpen(o => !o)}
+          aria-label="Icons"
+        >
+          <Shapes size={17} />
+          <span className="hb-word">Icons</span>
+        </button>
         <Notify api={excalidrawAPI as ExcalidrawImperativeAPI | null} flush={() => syncToBackend({ silent: true })} />
         <Voice api={excalidrawAPI as ExcalidrawImperativeAPI | null} flush={() => syncToBackend({ silent: true })} />
         <Scratch api={excalidrawAPI as ExcalidrawImperativeAPI | null} flush={() => syncToBackend({ silent: true })} />
@@ -1200,24 +1357,40 @@ function App(): JSX.Element {
             <div className={`status-dot ${isConnected ? 'status-connected' : 'status-disconnected'}`}></div>
             {/* Local patch: saving is automatic; this only reports it. */}
             <span className="save-state" role="status">
-              {!isConnected ? 'Offline · kept on this device'
-                : unsent && pushFailed ? 'Not saved yet · kept on this device'
-                : unsent || syncStatus === 'syncing' ? 'Saving…'
-                : 'Saved'}
+              {!isConnected
+                ? 'Offline · kept on this device'
+                : unsent && pushFailed
+                  ? 'Not saved yet · kept on this device'
+                  : unsent || syncStatus === 'syncing'
+                    ? 'Saving…'
+                    : 'Saved'}
             </span>
           </div>
 
-          <button type="button" className="btn-secondary" onClick={clearCanvas} disabled={!isConnected || sceneLoadStatus !== 'ready'} aria-label="Clear canvas"><Eraser size={17} /><span className="hb-word">Clear</span></button>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={clearCanvas}
+            disabled={!isConnected || sceneLoadStatus !== 'ready'}
+            aria-label="Clear canvas"
+          >
+            <Eraser size={17} />
+            <span className="hb-word">Clear</span>
+          </button>
         </div>
       </div>
 
       {sceneLoadStatus !== 'ready' && !sceneShown && (
         <div className="scene-load-status" role={sceneLoadStatus === 'failed' ? 'alert' : 'status'}>
-          <span>{sceneLoadStatus === 'failed'
-            ? 'Canvas could not be loaded. Sync is paused to protect your saved scene.'
-            : 'Loading canvas. Sync is paused until the scene is ready.'}</span>
+          <span>
+            {sceneLoadStatus === 'failed'
+              ? 'Canvas could not be loaded. Sync is paused to protect your saved scene.'
+              : 'Loading canvas. Sync is paused until the scene is ready.'}
+          </span>
           {sceneLoadStatus === 'failed' && (
-            <button type="button" className="btn-secondary" onClick={() => void loadExistingElements()}>Retry loading</button>
+            <button type="button" className="btn-secondary" onClick={() => void loadExistingElements()}>
+              Retry loading
+            </button>
           )}
         </div>
       )}
@@ -1259,11 +1432,16 @@ function App(): JSX.Element {
                 currentItemStrokeWidth: 0.5,
                 currentItemFontSize: 28,
                 currentItemFontFamily: 5,
-              }
+              },
             }}
           />
-          <SelectionDelete api={excalidrawAPI as ExcalidrawImperativeAPI | null} flush={() => syncToBackend({ silent: true })} />
-          {iconsOpen && <IconPanel api={excalidrawAPI as ExcalidrawImperativeAPI | null} onClose={() => setIconsOpen(false)} />}
+          <SelectionDelete
+            api={excalidrawAPI as ExcalidrawImperativeAPI | null}
+            flush={() => syncToBackend({ silent: true })}
+          />
+          {iconsOpen && (
+            <IconPanel api={excalidrawAPI as ExcalidrawImperativeAPI | null} onClose={() => setIconsOpen(false)} />
+          )}
         </div>
       </div>
     </div>

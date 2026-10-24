@@ -1,106 +1,114 @@
-import type { ExcalidrawFile, ServerElement } from '../../types.js';
-import { prepareScene, renderSvgWithExcalidraw, serializeSceneForPng } from './excalidraw-node/index.js';
-import { svgToPngIsolated } from './png.js';
-import { embedPngScene } from '../png-scene.js';
+import type { ExcalidrawFile, ServerElement } from '../../types.js'
+import { embedPngScene } from '../png-scene.js'
+import { prepareScene, renderSvgWithExcalidraw, serializeSceneForPng } from './excalidraw-node/index.js'
 import {
   collectFontEntriesFromSvg,
   fontFaceCss,
   fontFilesFor,
   needsSystemFonts,
   rewriteFontFamilies,
-  substitutedFamilies
-} from './fonts.js';
+  substitutedFamilies,
+} from './fonts.js'
+import { svgToPngIsolated } from './png.js'
 
 // Headless renderer: expanded Excalidraw scene in, SVG text or PNG out. No
 // browser involved — Excalidraw's own exporter runs under jsdom (see
 // excalidraw-node/) and resvg rasterizes. Used by the canvas server for
 // /api/export/image and by the offline `render` CLI command.
 
-export type RenderFormat = 'png' | 'svg';
-export type RendererName = 'auto' | 'node' | 'browser';
+export type RenderFormat = 'png' | 'svg'
+export type RendererName = 'auto' | 'node' | 'browser'
 
-export interface Area { x: number; y: number; w: number; h: number }
+export interface Area {
+  x: number
+  y: number
+  w: number
+  h: number
+}
 
 export interface RenderOptions {
-  format: RenderFormat;
-  background?: boolean;           // default true
-  viewBackgroundColor?: string;   // default #ffffff
-  dark?: boolean;                 // Excalidraw's dark-mode filter
-  scale?: number;                 // PNG only, 1..4 (clamped by max dimension)
-  padding?: number;               // px around the scene, default 10
-  elementIds?: string[];          // render only these (plus their bound text)
-  frameId?: string;               // render one frame, clipped to it
-  area?: Area;                    // local patch: render this scene box, clipped to it (a canvas note's marked area)
-  embedFonts?: boolean;           // SVG only: inline @font-face, default true
-  embedScene?: boolean;           // PNG only: include the editable scene, default false
-  systemFonts?: boolean;          // PNG only: let resvg use machine fonts; default auto (non-Latin text)
+  format: RenderFormat
+  background?: boolean // default true
+  viewBackgroundColor?: string // default #ffffff
+  dark?: boolean // Excalidraw's dark-mode filter
+  scale?: number // PNG only, 1..4 (clamped by max dimension)
+  padding?: number // px around the scene, default 10
+  elementIds?: string[] // render only these (plus their bound text)
+  frameId?: string // render one frame, clipped to it
+  area?: Area // local patch: render this scene box, clipped to it (a canvas note's marked area)
+  embedFonts?: boolean // SVG only: inline @font-face, default true
+  embedScene?: boolean // PNG only: include the editable scene, default false
+  systemFonts?: boolean // PNG only: let resvg use machine fonts; default auto (non-Latin text)
 }
 
 export interface SceneAppState {
-  viewBackgroundColor?: string;
-  gridSize?: number | null;
-  [key: string]: unknown;
+  viewBackgroundColor?: string
+  gridSize?: number | null
+  [key: string]: unknown
 }
 
 export interface RenderableScene {
   // Canvas-server elements (agent shorthand allowed) or native Excalidraw
   // elements; both are prepared the way the canvas tab prepares them.
-  elements: ServerElement[];
-  files: Record<string, ExcalidrawFile>;
-  appState?: SceneAppState;
+  elements: ServerElement[]
+  files: Record<string, ExcalidrawFile>
+  appState?: SceneAppState
 }
 
 export interface RenderResult {
-  format: RenderFormat;
-  data: string;                   // SVG text, or base64 PNG
-  width: number;
-  height: number;
-  warnings: string[];
+  format: RenderFormat
+  data: string // SVG text, or base64 PNG
+  width: number
+  height: number
+  warnings: string[]
 }
 
 export class RenderError extends Error {
-  status: 400 | 404;
+  status: 400 | 404
   constructor(message: string, status: 400 | 404 = 400) {
-    super(message);
-    this.status = status;
+    super(message)
+    this.status = status
   }
 }
 
-export const MAX_SCALE = 4;
-export const DEFAULT_PADDING = 10;
-export const DEFAULT_MAX_DIMENSION = 8192;
+export const MAX_SCALE = 4
+export const DEFAULT_PADDING = 10
+export const DEFAULT_MAX_DIMENSION = 8192
 
 export function maxDimension(): number {
-  const raw = Number(process.env.EXCALIDRAW_RENDER_MAX_DIM);
-  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_MAX_DIMENSION;
+  const raw = Number(process.env.EXCALIDRAW_RENDER_MAX_DIM)
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_MAX_DIMENSION
 }
 
-export function validateRenderOptions(options: RenderOptions): Required<Omit<RenderOptions, 'elementIds' | 'frameId' | 'area' | 'systemFonts'>> & Pick<RenderOptions, 'elementIds' | 'frameId' | 'area' | 'systemFonts'> {
+export function validateRenderOptions(
+  options: RenderOptions,
+): Required<Omit<RenderOptions, 'elementIds' | 'frameId' | 'area' | 'systemFonts'>> &
+  Pick<RenderOptions, 'elementIds' | 'frameId' | 'area' | 'systemFonts'> {
   if (options.format !== 'png' && options.format !== 'svg') {
-    throw new RenderError('format must be "png" or "svg"');
+    throw new RenderError('format must be "png" or "svg"')
   }
   if (options.embedScene && options.format !== 'png') {
-    throw new RenderError('embedScene is only supported for PNG exports');
+    throw new RenderError('embedScene is only supported for PNG exports')
   }
-  const scale = options.scale ?? 1;
+  const scale = options.scale ?? 1
   if (!Number.isFinite(scale) || scale < 1 || scale > MAX_SCALE) {
-    throw new RenderError(`scale must be a number between 1 and ${MAX_SCALE}`);
+    throw new RenderError(`scale must be a number between 1 and ${MAX_SCALE}`)
   }
-  const padding = options.padding ?? DEFAULT_PADDING;
+  const padding = options.padding ?? DEFAULT_PADDING
   if (!Number.isFinite(padding) || padding < 0) {
-    throw new RenderError('padding must be a non-negative number');
+    throw new RenderError('padding must be a non-negative number')
   }
   if (options.elementIds && options.frameId) {
-    throw new RenderError('elementIds and frameId are mutually exclusive');
+    throw new RenderError('elementIds and frameId are mutually exclusive')
   }
   if ([options.elementIds, options.frameId, options.area].filter(Boolean).length > 1) {
-    throw new RenderError('elementIds, frameId and area are mutually exclusive');
+    throw new RenderError('elementIds, frameId and area are mutually exclusive')
   }
   if (options.area && !(options.area.w > 0 && options.area.h > 0)) {
-    throw new RenderError('area needs a positive w and h');
+    throw new RenderError('area needs a positive w and h')
   }
   if (options.elementIds && (!Array.isArray(options.elementIds) || options.elementIds.length === 0)) {
-    throw new RenderError('elementIds must be a non-empty array of element ids');
+    throw new RenderError('elementIds must be a non-empty array of element ids')
   }
   return {
     format: options.format,
@@ -114,107 +122,132 @@ export function validateRenderOptions(options: RenderOptions): Required<Omit<Ren
     elementIds: options.elementIds,
     frameId: options.frameId,
     area: options.area,
-    systemFonts: options.systemFonts
-  };
+    systemFonts: options.systemFonts,
+  }
 }
 
 // Keep the requested elements plus the text bound to them, so a selected
 // shape still shows its label. Arrows bound to selected shapes are not pulled
 // in implicitly — the caller decides what goes in the picture.
 export function selectElements(elements: ServerElement[], elementIds: string[]): ServerElement[] {
-  const wanted = new Set(elementIds);
-  const byId = new Map(elements.map(el => [el.id, el]));
-  const missing = elementIds.filter(id => !byId.has(id));
+  const wanted = new Set(elementIds)
+  const byId = new Map(elements.map(el => [el.id, el]))
+  const missing = elementIds.filter(id => !byId.has(id))
   if (missing.length > 0) {
-    throw new RenderError(`Unknown element id(s): ${missing.join(', ')}`, 404);
+    throw new RenderError(`Unknown element id(s): ${missing.join(', ')}`, 404)
   }
-  return elements.filter(el =>
-    wanted.has(el.id) || (el.type === 'text' && el.containerId && wanted.has(el.containerId))
-  );
+  return elements.filter(
+    el => wanted.has(el.id) || (el.type === 'text' && el.containerId && wanted.has(el.containerId)),
+  )
 }
 
 export function findFrame(elements: ServerElement[], frameId: string): ServerElement {
-  const frame = elements.find(el => el.id === frameId);
-  if (!frame) throw new RenderError(`Unknown frame id: ${frameId}`, 404);
+  const frame = elements.find(el => el.id === frameId)
+  if (!frame) throw new RenderError(`Unknown frame id: ${frameId}`, 404)
   if (frame.type !== 'frame' && frame.type !== 'magicframe') {
-    throw new RenderError(`Element ${frameId} is a ${frame.type}, not a frame`);
+    throw new RenderError(`Element ${frameId} is a ${frame.type}, not a frame`)
   }
-  return frame;
+  return frame
 }
 
 // A frame that is not in the scene: Excalidraw's frame export then crops to the box and draws no frame.
 function areaFrame({ x, y, w, h }: Area): ServerElement {
-  return { id: '__area', type: 'frame', x, y, width: w, height: h, angle: 0, name: null, groupIds: [], frameId: null, isDeleted: false }
+  return {
+    id: '__area',
+    type: 'frame',
+    x,
+    y,
+    width: w,
+    height: h,
+    angle: 0,
+    name: null,
+    groupIds: [],
+    frameId: null,
+    isDeleted: false,
+  }
 }
 
 function svgDimensions(svg: string): { width: number; height: number } {
-  const root = svg.match(/^<svg[^>]*>/)?.[0] ?? '';
-  const width = Number(root.match(/\swidth="([\d.]+)"/)?.[1]);
-  const height = Number(root.match(/\sheight="([\d.]+)"/)?.[1]);
-  return { width: Number.isFinite(width) ? width : 0, height: Number.isFinite(height) ? height : 0 };
+  const root = svg.match(/^<svg[^>]*>/)?.[0] ?? ''
+  const width = Number(root.match(/\swidth="([\d.]+)"/)?.[1])
+  const height = Number(root.match(/\sheight="([\d.]+)"/)?.[1])
+  return { width: Number.isFinite(width) ? width : 0, height: Number.isFinite(height) ? height : 0 }
 }
 
 export async function renderScene(scene: RenderableScene, rawOptions: RenderOptions): Promise<RenderResult> {
   const options = validateRenderOptions({
     ...rawOptions,
-    viewBackgroundColor: rawOptions.viewBackgroundColor ?? scene.appState?.viewBackgroundColor
-  });
-  const warnings: string[] = [];
+    viewBackgroundColor: rawOptions.viewBackgroundColor ?? scene.appState?.viewBackgroundColor,
+  })
+  const warnings: string[] = []
 
-  const live = await prepareScene(scene.elements.filter(el => el && !el.isDeleted));
-  const elements = options.elementIds ? selectElements(live, options.elementIds) : live;
-  const exportingFrame = options.frameId ? findFrame(live, options.frameId) : options.area ? areaFrame(options.area) : null;
+  const live = await prepareScene(scene.elements.filter(el => el && !el.isDeleted))
+  const elements = options.elementIds ? selectElements(live, options.elementIds) : live
+  const exportingFrame = options.frameId
+    ? findFrame(live, options.frameId)
+    : options.area
+      ? areaFrame(options.area)
+      : null
 
   let svg = await renderSvgWithExcalidraw(elements, scene.files ?? {}, {
     background: options.background,
     viewBackgroundColor: options.viewBackgroundColor,
     dark: options.dark,
     padding: options.padding,
-    exportingFrame
-  });
+    exportingFrame,
+  })
 
-  const fontEntries = collectFontEntriesFromSvg(svg);
-  svg = rewriteFontFamilies(svg, fontEntries);
-  warnings.push(...substitutedFamilies(fontEntries));
+  const fontEntries = collectFontEntriesFromSvg(svg)
+  svg = rewriteFontFamilies(svg, fontEntries)
+  warnings.push(...substitutedFamilies(fontEntries))
 
-  const { width, height } = svgDimensions(svg);
+  const { width, height } = svgDimensions(svg)
 
   if (options.format === 'svg') {
     if (options.embedFonts) {
       svg = svg.replace(
         /<style class="style-fonts">[\s\S]*?<\/style>/,
-        () => `<style class="style-fonts">\n${fontFaceCss(fontEntries)}\n</style>`
-      );
+        () => `<style class="style-fonts">\n${fontFaceCss(fontEntries)}\n</style>`,
+      )
     }
-    return { format: 'svg', data: svg, width, height, warnings };
+    return { format: 'svg', data: svg, width, height, warnings }
   }
 
-  let scale = options.scale;
-  const largest = Math.max(width, height);
-  const limit = maxDimension();
+  let scale = options.scale
+  const largest = Math.max(width, height)
+  const limit = maxDimension()
   if (largest > 0 && largest * scale > limit) {
     // May go below 1 when the scene itself is larger than the limit; the cap
     // exists to bound memory, so the image shrinks rather than failing.
-    scale = Math.max(0.1, Math.floor((limit / largest) * 1000) / 1000);
-    warnings.push(`scale reduced to ${scale} so the image stays within ${limit}px`);
+    scale = Math.max(0.1, Math.floor((limit / largest) * 1000) / 1000)
+    warnings.push(`scale reduced to ${scale} so the image stays within ${limit}px`)
   }
-  const loadSystemFonts = options.systemFonts ?? needsSystemFonts(elements);
+  const loadSystemFonts = options.systemFonts ?? needsSystemFonts(elements)
   if (loadSystemFonts && options.systemFonts === undefined) {
-    warnings.push('non-Latin text detected: system fonts were used, so output may differ across machines');
+    warnings.push('non-Latin text detected: system fonts were used, so output may differ across machines')
   }
 
   const png = await svgToPngIsolated(svg, {
     scale,
     fontFiles: fontFilesFor(fontEntries),
     loadSystemFonts,
-    defaultFontFamily: 'Excalifont'
-  });
+    defaultFontFamily: 'Excalifont',
+  })
   const data = options.embedScene
-    ? embedPngScene(png.data, await serializeSceneForPng(elements, scene.files ?? {}, {
-      ...scene.appState,
-      viewBackgroundColor: options.viewBackgroundColor,
-      gridSize: scene.appState?.gridSize ?? null
-    }, exportingFrame, scene.elements))
-    : png.data;
-  return { format: 'png', data: data.toString('base64'), width: png.width, height: png.height, warnings };
+    ? embedPngScene(
+        png.data,
+        await serializeSceneForPng(
+          elements,
+          scene.files ?? {},
+          {
+            ...scene.appState,
+            viewBackgroundColor: options.viewBackgroundColor,
+            gridSize: scene.appState?.gridSize ?? null,
+          },
+          exportingFrame,
+          scene.elements,
+        ),
+      )
+    : png.data
+  return { format: 'png', data: data.toString('base64'), width: png.width, height: png.height, warnings }
 }

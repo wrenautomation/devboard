@@ -2,17 +2,30 @@
 // style panel (the choice is remembered); it shows only when there is something to style: a selection, or a
 // tool that draws. The width row replaces Excalidraw's three fixed widths inside that panel: four presets
 // and a slider for any width. It sets the pen default and the selected shapes.
-import { useEffect, useState } from 'react'
-import { createPortal } from 'react-dom'
+
 import { CaptureUpdateAction } from '@excalidraw/excalidraw'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
 import { ChevronDown } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 
-const PRESETS: [number, string][] = [[0.5, 'Fine'], [1, 'Thin'], [2, 'Bold'], [4, 'Heavy']]
-const MIN = 0.25, MAX = 10
+const PRESETS: [number, string][] = [
+  [0.5, 'Fine'],
+  [1, 'Thin'],
+  [2, 'Bold'],
+  [4, 'Heavy'],
+]
+const MIN = 0.25,
+  MAX = 10
 const NOTHING_TO_STYLE = new Set(['selection', 'lasso', 'hand', 'eraser', 'laser'])
 
-const remembered = () => { try { return window.localStorage?.getItem('canvas-style-hidden') === '1' } catch { return false } }
+const remembered = () => {
+  try {
+    return window.localStorage?.getItem('canvas-style-hidden') === '1'
+  } catch {
+    return false
+  }
+}
 
 export function StrokeWidth({ api }: { api: ExcalidrawImperativeAPI | null }) {
   const [width, setWidth] = useState(0.5)
@@ -42,7 +55,11 @@ export function StrokeWidth({ api }: { api: ExcalidrawImperativeAPI | null }) {
     const find = () => {
       const set = document.querySelector('.selected-shape-actions fieldset:has(input[name="stroke-width"])')
       let el = set?.querySelector<HTMLElement>(':scope > .sw-slot') ?? null
-      if (set && !el) { el = document.createElement('div'); el.className = 'sw-slot'; set.appendChild(el) }
+      if (set && !el) {
+        el = document.createElement('div')
+        el.className = 'sw-slot'
+        set.appendChild(el)
+      }
       setSlot(prev => (prev === el ? prev : el))
     }
     find()
@@ -53,7 +70,11 @@ export function StrokeWidth({ api }: { api: ExcalidrawImperativeAPI | null }) {
 
   useEffect(() => {
     document.documentElement.dataset.styleHidden = hidden ? '1' : '0'
-    try { window.localStorage?.setItem('canvas-style-hidden', hidden ? '1' : '0') } catch { /* private mode */ }
+    try {
+      window.localStorage?.setItem('canvas-style-hidden', hidden ? '1' : '0')
+    } catch {
+      /* private mode */
+    }
   }, [hidden])
 
   const apply = (w: number) => {
@@ -63,9 +84,17 @@ export function StrokeWidth({ api }: { api: ExcalidrawImperativeAPI | null }) {
     const picked = api.getAppState().selectedElementIds
     api.updateScene({
       appState: { currentItemStrokeWidth: value },
-      elements: api.getSceneElementsIncludingDeleted().map(e => picked[e.id] && !e.isDeleted
-        ? { ...e, strokeWidth: value, version: e.version + 1, versionNonce: Math.floor(Math.random() * 2 ** 31), updated: Date.now() }
-        : e),
+      elements: api.getSceneElementsIncludingDeleted().map(e =>
+        picked[e.id] && !e.isDeleted
+          ? {
+              ...e,
+              strokeWidth: value,
+              version: e.version + 1,
+              versionNonce: Math.floor(Math.random() * 2 ** 31),
+              updated: Date.now(),
+            }
+          : e,
+      ),
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     })
   }
@@ -73,29 +102,51 @@ export function StrokeWidth({ api }: { api: ExcalidrawImperativeAPI | null }) {
   return (
     <>
       {shown && (
-        <button type="button" className="style-toggle" onClick={() => setHidden(h => !h)} aria-expanded={!hidden} aria-label="Style">
+        <button
+          type="button"
+          className="style-toggle"
+          onClick={() => setHidden(h => !h)}
+          aria-expanded={!hidden}
+          aria-label="Style"
+        >
           <span className="st-swatch" style={{ background: color }} />
           <span className="st-line" style={{ height: Math.min(8, Math.max(1, width * 1.5)) }} />
           <span>Style</span>
           <ChevronDown size={16} className="st-chev" />
         </button>
       )}
-      {slot && createPortal(
-        <div className="sw-row">
-          <div className="sw-presets">
-            {PRESETS.map(([w, label]) => (
-              <button key={w} type="button" className={width === w ? 'on' : ''} onClick={() => apply(w)} title={`${label} (${w})`} aria-label={label}>
-                <span className="sw-line" style={{ height: Math.max(1, w * 1.5) }} />
-              </button>
-            ))}
-          </div>
-          <div className="sw-custom">
-            <input type="range" min={MIN} max={MAX} step={0.25} value={width} onChange={e => apply(Number(e.target.value))} aria-label="Stroke width" />
-            <span className="sw-val">{width}</span>
-          </div>
-        </div>,
-        slot,
-      )}
+      {slot &&
+        createPortal(
+          <div className="sw-row">
+            <div className="sw-presets">
+              {PRESETS.map(([w, label]) => (
+                <button
+                  key={w}
+                  type="button"
+                  className={width === w ? 'on' : ''}
+                  onClick={() => apply(w)}
+                  title={`${label} (${w})`}
+                  aria-label={label}
+                >
+                  <span className="sw-line" style={{ height: Math.max(1, w * 1.5) }} />
+                </button>
+              ))}
+            </div>
+            <div className="sw-custom">
+              <input
+                type="range"
+                min={MIN}
+                max={MAX}
+                step={0.25}
+                value={width}
+                onChange={e => apply(Number(e.target.value))}
+                aria-label="Stroke width"
+              />
+              <span className="sw-val">{width}</span>
+            </div>
+          </div>,
+          slot,
+        )}
     </>
   )
 }

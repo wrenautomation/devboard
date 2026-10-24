@@ -7,7 +7,9 @@ type Recognizer = {
   lang: string
   continuous: boolean
   interimResults: boolean
-  onresult: ((e: { resultIndex: number; results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => void) | null
+  onresult:
+    | ((e: { resultIndex: number; results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => void)
+    | null
   onerror: ((e: { error: string }) => void) | null
   onend: (() => void) | null
   start(): void
@@ -39,7 +41,9 @@ export function formatSpeech(raw: string): string {
     .replace(/[ \t]+/g, ' ')
     .replace(/ +([.,?!:])/g, '$1')
     .replace(/\bi\b/g, 'I')
-    .split('\n').map(l => l.trim()).join('\n')
+    .split('\n')
+    .map(l => l.trim())
+    .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .replace(/(^|[.?!]\s+|\n(?:• )?)([a-z])/g, (_, a, b) => a + b.toUpperCase())
   return t.replace(/^\s+/, '').replace(/[ \t]+$/, '') // a trailing new line stays, so the next phrase starts there
@@ -58,7 +62,8 @@ export function useDictation(onText: (said: string) => void, onError: (msg: stri
     r.continuous = true
     r.interimResults = true
     r.onresult = e => {
-      let done = '', wip = ''
+      let done = '',
+        wip = ''
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const result = e.results[i]
         if (!result) continue
@@ -68,8 +73,14 @@ export function useDictation(onText: (said: string) => void, onError: (msg: stri
       setInterim(wip)
       if (done.trim()) onText(done.trim())
     }
-    r.onerror = e => { if (e.error !== 'aborted' && e.error !== 'no-speech') onError(`Mic: ${e.error}`) }
-    r.onend = () => { rec.current = null; setListening(false); setInterim('') }
+    r.onerror = e => {
+      if (e.error !== 'aborted' && e.error !== 'no-speech') onError(`Mic: ${e.error}`)
+    }
+    r.onend = () => {
+      rec.current = null
+      setListening(false)
+      setInterim('')
+    }
     rec.current = r
     r.start()
     setListening(true)
@@ -78,4 +89,5 @@ export function useDictation(onText: (said: string) => void, onError: (msg: stri
 }
 
 // Adds a phrase to the end of a draft with one space between.
-export const appendSaid = (draft: string, said: string) => (draft ? draft.replace(/[ \t]*$/, /\n$/.test(draft) ? '' : ' ') : '') + said
+export const appendSaid = (draft: string, said: string) =>
+  (draft ? draft.replace(/[ \t]*$/, /\n$/.test(draft) ? '' : ' ') : '') + said

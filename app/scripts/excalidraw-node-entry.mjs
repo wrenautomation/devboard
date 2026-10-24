@@ -7,11 +7,11 @@
 // (frontend/src/utils/scene.ts), so headless renders see exactly the scene
 // the tab shows: same label sizing and centering, same defaults.
 export {
-  exportToSvg,
-  serializeAsJSON,
   elementsOverlappingBBox,
-  restoreElements,
+  exportToSvg,
+  FONT_FAMILY,
   getCommonBounds,
-  FONT_FAMILY
-} from '@excalidraw/excalidraw';
-export { prepareServerScene, cleanElementForExcalidraw } from '../frontend/src/utils/scene.ts';
+  restoreElements,
+  serializeAsJSON,
+} from '@excalidraw/excalidraw'
+export { cleanElementForExcalidraw, prepareServerScene } from '../frontend/src/utils/scene.ts'

@@ -1,103 +1,102 @@
-import logger from '../utils/logger.js';
-import type { ServerElement, ExcalidrawFile, ExportImageOptions } from '../types.js';
-import { EXPRESS_SERVER_URL, ENABLE_CANVAS_SYNC } from './config.js';
-import { CodedError } from './errors.js';
+import type { ExcalidrawFile, ExportImageOptions, ServerElement } from '../types.js'
+import logger from '../utils/logger.js'
+import { ENABLE_CANVAS_SYNC, EXPRESS_SERVER_URL } from './config.js'
+import { CodedError } from './errors.js'
 
 // API Response types
 export interface ApiResponse {
-  success: boolean;
-  element?: ServerElement;
-  elements?: ServerElement[];
-  message?: string;
-  error?: string;
-  count?: number;
+  success: boolean
+  element?: ServerElement
+  elements?: ServerElement[]
+  message?: string
+  error?: string
+  count?: number
 }
 
 export interface SyncResponse {
-  element?: ServerElement;
-  elements?: ServerElement[];
+  element?: ServerElement
+  elements?: ServerElement[]
 }
 
 // Helper functions to sync with Express server (canvas)
-type SyncPayload = Partial<ServerElement> & { id: string } | ServerElement[];
+type SyncPayload = (Partial<ServerElement> & { id: string }) | ServerElement[]
 export async function syncToCanvas(operation: string, data: SyncPayload): Promise<SyncResponse | null> {
   if (!ENABLE_CANVAS_SYNC) {
-    logger.debug('Canvas sync disabled, skipping');
-    return null;
+    logger.debug('Canvas sync disabled, skipping')
+    return null
   }
 
   try {
-    let url: string;
-    let options: RequestInit;
-    const id = Array.isArray(data) ? '' : data.id;
+    let url: string
+    let options: RequestInit
+    const id = Array.isArray(data) ? '' : data.id
 
     switch (operation) {
       case 'create':
-        url = `${EXPRESS_SERVER_URL}/api/elements`;
+        url = `${EXPRESS_SERVER_URL}/api/elements`
         options = {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data)
-        };
-        break;
+          body: JSON.stringify(data),
+        }
+        break
 
       case 'update':
-        url = `${EXPRESS_SERVER_URL}/api/elements/${id}`;
+        url = `${EXPRESS_SERVER_URL}/api/elements/${id}`
         options = {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data)
-        };
-        break;
+          body: JSON.stringify(data),
+        }
+        break
 
       case 'delete':
-        url = `${EXPRESS_SERVER_URL}/api/elements/${id}`;
-        options = { method: 'DELETE' };
-        break;
+        url = `${EXPRESS_SERVER_URL}/api/elements/${id}`
+        options = { method: 'DELETE' }
+        break
 
       case 'batch_create':
-        url = `${EXPRESS_SERVER_URL}/api/elements/batch`;
+        url = `${EXPRESS_SERVER_URL}/api/elements/batch`
         options = {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ elements: data })
-        };
-        break;
+          body: JSON.stringify({ elements: data }),
+        }
+        break
 
       case 'replace_elements':
-        url = `${EXPRESS_SERVER_URL}/api/elements/batch`;
+        url = `${EXPRESS_SERVER_URL}/api/elements/batch`
         options = {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ elements: data, replace: true })
-        };
-        break;
+          body: JSON.stringify({ elements: data, replace: true }),
+        }
+        break
 
       default:
-        logger.warn(`Unknown sync operation: ${operation}`);
-        return null;
+        logger.warn(`Unknown sync operation: ${operation}`)
+        return null
     }
 
-    await assertCanvasIdentity();
+    await assertCanvasIdentity()
 
-    logger.debug(`Syncing to canvas: ${operation}`, { url, data });
-    const response = await fetch(url, options);
+    logger.debug(`Syncing to canvas: ${operation}`, { url, data })
+    const response = await fetch(url, options)
 
     // Parse JSON response regardless of HTTP status
-    const result = await response.json() as ApiResponse;
+    const result = (await response.json()) as ApiResponse
 
     if (!response.ok) {
-      logger.warn(`Canvas sync returned error status: ${response.status}`, result);
-      throw new Error(result.error || `Canvas sync failed: ${response.status} ${response.statusText}`);
+      logger.warn(`Canvas sync returned error status: ${response.status}`, result)
+      throw new Error(result.error || `Canvas sync failed: ${response.status} ${response.statusText}`)
     }
 
-    logger.debug(`Canvas sync successful: ${operation}`, result);
-    return result as SyncResponse;
-
+    logger.debug(`Canvas sync successful: ${operation}`, result)
+    return result as SyncResponse
   } catch (error) {
-    logger.warn(`Canvas sync failed for ${operation}:`, (error as Error).message);
+    logger.warn(`Canvas sync failed for ${operation}:`, (error as Error).message)
     // Don't throw - we want MCP operations to work even if canvas is unavailable
-    return null;
+    return null
   }
 }
 
@@ -106,157 +105,169 @@ export async function syncToCanvas(operation: string, data: SyncPayload): Promis
 // sync enabled but failed = null, so callers report the failure instead of
 // claiming "synced to canvas" for an element that never landed.
 export async function createElementOnCanvas(elementData: ServerElement): Promise<ServerElement | null> {
-  if (!ENABLE_CANVAS_SYNC) return elementData;
-  const result = await syncToCanvas('create', elementData);
-  return result?.element ?? null;
+  if (!ENABLE_CANVAS_SYNC) return elementData
+  const result = await syncToCanvas('create', elementData)
+  return result?.element ?? null
 }
 
 // Helper to sync element update to canvas
-export async function updateElementOnCanvas(elementData: Partial<ServerElement> & { id: string }): Promise<ServerElement | null> {
-  const result = await syncToCanvas('update', elementData);
-  return result?.element || null;
+export async function updateElementOnCanvas(
+  elementData: Partial<ServerElement> & { id: string },
+): Promise<ServerElement | null> {
+  const result = await syncToCanvas('update', elementData)
+  return result?.element || null
 }
 
 // Helper to sync element deletion to canvas
 export async function deleteElementOnCanvas(elementId: string): Promise<SyncResponse | null> {
-  const result = await syncToCanvas('delete', { id: elementId });
-  return result;
+  const result = await syncToCanvas('delete', { id: elementId })
+  return result
 }
 
 // Helper to sync batch creation to canvas (same failure semantics as
 // createElementOnCanvas: disabled = echo, failed = null)
 export async function batchCreateElementsOnCanvas(elementsData: ServerElement[]): Promise<ServerElement[] | null> {
-  if (!ENABLE_CANVAS_SYNC) return elementsData;
-  const result = await syncToCanvas('batch_create', elementsData);
-  return result?.elements ?? null;
+  if (!ENABLE_CANVAS_SYNC) return elementsData
+  const result = await syncToCanvas('batch_create', elementsData)
+  return result?.elements ?? null
 }
 
 // Atomically replace the canvas only after the server validates and prepares
 // the complete incoming batch. This prevents a rejected import from erasing
 // the scene that was already on the canvas.
 export async function replaceElementsOnCanvas(elementsData: ServerElement[]): Promise<ServerElement[] | null> {
-  if (!ENABLE_CANVAS_SYNC) return elementsData;
-  const result = await syncToCanvas('replace_elements', elementsData);
-  return result?.elements ?? null;
+  if (!ENABLE_CANVAS_SYNC) return elementsData
+  const result = await syncToCanvas('replace_elements', elementsData)
+  return result?.elements ?? null
 }
 
 // Helper to fetch element from canvas
 export async function getElementFromCanvas(elementId: string): Promise<ServerElement | null> {
   if (!ENABLE_CANVAS_SYNC) {
-    logger.debug('Canvas sync disabled, skipping fetch');
-    return null;
+    logger.debug('Canvas sync disabled, skipping fetch')
+    return null
   }
 
   try {
-    await assertCanvasIdentity();
-    const response = await fetch(`${EXPRESS_SERVER_URL}/api/elements/${elementId}`);
+    await assertCanvasIdentity()
+    const response = await fetch(`${EXPRESS_SERVER_URL}/api/elements/${elementId}`)
     if (!response.ok) {
-      logger.warn(`Failed to fetch element ${elementId}: ${response.status}`);
-      return null;
+      logger.warn(`Failed to fetch element ${elementId}: ${response.status}`)
+      return null
     }
-    const data = await response.json() as { element?: ServerElement };
-    return data.element || null;
+    const data = (await response.json()) as { element?: ServerElement }
+    return data.element || null
   } catch (error) {
-    logger.error('Error fetching element from canvas:', error);
-    return null;
+    logger.error('Error fetching element from canvas:', error)
+    return null
   }
 }
 
 // ---- Typed REST wrappers shared by the MCP server and CLI ----
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  await assertCanvasIdentity();
-  const response = await fetch(`${EXPRESS_SERVER_URL}${path}`, init);
-  const data = await response.json().catch(() => null) as { error?: string } | null;
+  await assertCanvasIdentity()
+  const response = await fetch(`${EXPRESS_SERVER_URL}${path}`, init)
+  const data = (await response.json().catch(() => null)) as { error?: string } | null
   if (!response.ok) {
-    throw new Error(data?.error || `HTTP server error: ${response.status} ${response.statusText}`);
+    throw new Error(data?.error || `HTTP server error: ${response.status} ${response.statusText}`)
   }
-  return data as T;
+  return data as T
 }
 
 export async function getElements(): Promise<ServerElement[]> {
-  const data = await requestJson<ApiResponse>('/api/elements');
-  return data.elements || [];
+  const data = await requestJson<ApiResponse>('/api/elements')
+  return data.elements || []
 }
 
 export async function searchElements(queryParams: URLSearchParams): Promise<ServerElement[]> {
-  const data = await requestJson<ApiResponse>(`/api/elements/search?${queryParams}`);
-  return data.elements || [];
+  const data = await requestJson<ApiResponse>(`/api/elements/search?${queryParams}`)
+  return data.elements || []
 }
 
 export async function clearCanvas(): Promise<ApiResponse> {
-  return requestJson<ApiResponse>('/api/elements/clear', { method: 'DELETE' });
+  return requestJson<ApiResponse>('/api/elements/clear', { method: 'DELETE' })
 }
 
 export async function getFiles(): Promise<Record<string, ExcalidrawFile>> {
-  const data = await requestJson<{ files?: Record<string, ExcalidrawFile> }>('/api/files');
-  return data.files || {};
+  const data = await requestJson<{ files?: Record<string, ExcalidrawFile> }>('/api/files')
+  return data.files || {}
 }
 
 export async function postFiles(files: ExcalidrawFile[]): Promise<void> {
   await requestJson('/api/files', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(files)
-  });
+    body: JSON.stringify(files),
+  })
 }
 
 export interface ExportImageResult {
-  success: boolean;
-  format: string;
-  data: string;
-  renderer?: 'node' | 'browser';
-  width?: number;
-  height?: number;
-  warnings?: string[];
+  success: boolean
+  format: string
+  data: string
+  renderer?: 'node' | 'browser'
+  width?: number
+  height?: number
+  warnings?: string[]
 }
 
-export async function exportImage(options: ExportImageOptions): Promise<ExportImageResult>;
-export async function exportImage(format: 'png' | 'svg', background?: boolean): Promise<ExportImageResult>;
-export async function exportImage(arg: ExportImageOptions | 'png' | 'svg', background = true): Promise<ExportImageResult> {
-  const body: ExportImageOptions = typeof arg === 'string' ? { format: arg, background } : arg;
+export async function exportImage(options: ExportImageOptions): Promise<ExportImageResult>
+export async function exportImage(format: 'png' | 'svg', background?: boolean): Promise<ExportImageResult>
+export async function exportImage(
+  arg: ExportImageOptions | 'png' | 'svg',
+  background = true,
+): Promise<ExportImageResult> {
+  const body: ExportImageOptions = typeof arg === 'string' ? { format: arg, background } : arg
   return requestJson('/api/export/image', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
+    body: JSON.stringify(body),
+  })
 }
 
 export async function setViewport(params: Record<string, unknown>): Promise<{ success: boolean; message?: string }> {
   return requestJson('/api/viewport', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params)
-  });
+    body: JSON.stringify(params),
+  })
 }
 
-export interface SnapshotSummary { name: string; elementCount: number; createdAt: string }
+export interface SnapshotSummary {
+  name: string
+  elementCount: number
+  createdAt: string
+}
 
 export async function saveSnapshot(name: string): Promise<SnapshotSummary & { success: boolean }> {
   return requestJson('/api/snapshots', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name })
-  });
+    body: JSON.stringify({ name }),
+  })
 }
 
 export async function listSnapshots(): Promise<{ success: boolean; snapshots: SnapshotSummary[]; count: number }> {
-  return requestJson('/api/snapshots');
+  return requestJson('/api/snapshots')
 }
 
-export async function getSnapshot(name: string): Promise<{ name: string; elements: ServerElement[]; createdAt: string }> {
-  const data = await requestJson<{ success: boolean; snapshot: { name: string; elements: ServerElement[]; createdAt: string } }>(
-    `/api/snapshots/${encodeURIComponent(name)}`
-  );
-  return data.snapshot;
+export async function getSnapshot(
+  name: string,
+): Promise<{ name: string; elements: ServerElement[]; createdAt: string }> {
+  const data = await requestJson<{
+    success: boolean
+    snapshot: { name: string; elements: ServerElement[]; createdAt: string }
+  }>(`/api/snapshots/${encodeURIComponent(name)}`)
+  return data.snapshot
 }
 
 export async function sendMermaid(mermaidDiagram: string, config?: Record<string, unknown>): Promise<ApiResponse> {
   return requestJson('/api/elements/from-mermaid', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mermaidDiagram, config })
-  });
+    body: JSON.stringify({ mermaidDiagram, config }),
+  })
 }
 
 // ---- Strict CRUD variants (throw on failure) ----
@@ -267,41 +278,41 @@ export async function createElementStrict(element: ServerElement): Promise<Serve
   const data = await requestJson<ApiResponse>('/api/elements', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(element)
-  });
-  if (!data.element) throw new Error('The canvas returned no element');
-  return data.element;
+    body: JSON.stringify(element),
+  })
+  if (!data.element) throw new Error('The canvas returned no element')
+  return data.element
 }
 
 export async function updateElementStrict(element: Partial<ServerElement> & { id: string }): Promise<ServerElement> {
   const data = await requestJson<ApiResponse>(`/api/elements/${element.id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(element)
-  });
-  if (!data.element) throw new Error(`The canvas returned no element for ${element.id}`);
-  return data.element;
+    body: JSON.stringify(element),
+  })
+  if (!data.element) throw new Error(`The canvas returned no element for ${element.id}`)
+  return data.element
 }
 
 export async function deleteElementStrict(id: string): Promise<ApiResponse> {
-  return requestJson<ApiResponse>(`/api/elements/${id}`, { method: 'DELETE' });
+  return requestJson<ApiResponse>(`/api/elements/${id}`, { method: 'DELETE' })
 }
 
 export async function getElementStrict(id: string): Promise<ServerElement> {
-  const data = await requestJson<ApiResponse>(`/api/elements/${id}`);
+  const data = await requestJson<ApiResponse>(`/api/elements/${id}`)
   if (!data.element) {
-    throw new Error(`Element ${id} not found`);
+    throw new Error(`Element ${id} not found`)
   }
-  return data.element;
+  return data.element
 }
 
 export async function batchCreateElementsStrict(elements: ServerElement[]): Promise<ServerElement[]> {
   const data = await requestJson<ApiResponse>('/api/elements/batch', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ elements })
-  });
-  return data.elements || [];
+    body: JSON.stringify({ elements }),
+  })
+  return data.elements || []
 }
 
 // Strict counterpart of replaceElementsOnCanvas: the server validates the whole
@@ -310,22 +321,22 @@ export async function replaceElementsStrict(elements: ServerElement[]): Promise<
   const data = await requestJson<ApiResponse>('/api/elements/batch', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ elements, replace: true })
-  });
-  return data.elements || [];
+    body: JSON.stringify({ elements, replace: true }),
+  })
+  return data.elements || []
 }
 
 // Identity marker the canvas server puts in /health (v1.1+)
-export const CANVAS_SERVICE_NAME = 'mcp-excalidraw-canvas';
+export const CANVAS_SERVICE_NAME = 'mcp-excalidraw-canvas'
 
 export function foreignServiceError(quiet = false): CodedError {
   return new CodedError(
     `Something is answering at ${EXPRESS_SERVER_URL} but does not identify as this canvas server ` +
-    `(a pre-1.1 canvas build or an unrelated service on the port). ` +
-    `Upgrade/stop that service, or point EXPRESS_SERVER_URL elsewhere.`,
+      `(a pre-1.1 canvas build or an unrelated service on the port). ` +
+      `Upgrade/stop that service, or point EXPRESS_SERVER_URL elsewhere.`,
     'CANVAS_UNREACHABLE',
-    quiet
-  );
+    quiet,
+  )
 }
 
 // Revalidating identity gate in front of every /api request: mutations must
@@ -336,95 +347,97 @@ export function foreignServiceError(quiet = false): CodedError {
 // many concurrent requests) share a single probe instead of stampeding
 // /health. Note this is defense-in-depth against accidents, not a security
 // boundary: local processes can always reach a loopback port directly.
-const IDENTITY_TTL_MS = 3000;
-let identityVerifiedAt = 0;
-let identityProbe: Promise<void> | null = null;
+const IDENTITY_TTL_MS = 3000
+let identityVerifiedAt = 0
+let identityProbe: Promise<void> | null = null
 
 export function markCanvasIdentityVerified(): void {
-  identityVerifiedAt = Date.now();
+  identityVerifiedAt = Date.now()
 }
 
 async function assertCanvasIdentity(): Promise<void> {
-  if (Date.now() - identityVerifiedAt < IDENTITY_TTL_MS) return;
+  if (Date.now() - identityVerifiedAt < IDENTITY_TTL_MS) return
 
   if (!identityProbe) {
     identityProbe = (async () => {
       try {
-        let response: Response;
+        let response: Response
         try {
-          response = await fetch(`${EXPRESS_SERVER_URL}/health`, { signal: AbortSignal.timeout(1500) });
+          response = await fetch(`${EXPRESS_SERVER_URL}/health`, { signal: AbortSignal.timeout(1500) })
         } catch (error) {
           // Fail CLOSED on timeout: a listener that accepts connections but
           // never answers /health could still be a foreign service that
           // would accept /api mutations.
-          const name = (error as { name?: string })?.name;
+          const name = (error as { name?: string })?.name
           if (name === 'TimeoutError' || name === 'AbortError') {
             throw new CodedError(
               `The service at ${EXPRESS_SERVER_URL} did not answer the /health identity probe within 1500ms — ` +
-              `refusing to send it requests.`,
-              'CANVAS_UNREACHABLE'
-            );
+                `refusing to send it requests.`,
+              'CANVAS_UNREACHABLE',
+            )
           }
           // Connection-level unreachable (refused/reset/DNS): canvas is down
           // or booting — let the actual request fail with its own error.
           // Deliberately not marked verified, so the next call re-probes.
-          return;
+          return
         }
 
         // SOMETHING answered. Only a 200 with our identity payload may pass —
         // a 404 or an HTML page here is a foreign service, not a down canvas.
-        let health: { service?: string } | null = null;
+        let health: { service?: string } | null = null
         try {
-          health = await response.json() as { service?: string };
-        } catch { /* non-JSON body: foreign */ }
+          health = (await response.json()) as { service?: string }
+        } catch {
+          /* non-JSON body: foreign */
+        }
 
         if (!response.ok || health?.service !== CANVAS_SERVICE_NAME) {
-          throw foreignServiceError();
+          throw foreignServiceError()
         }
-        identityVerifiedAt = Date.now();
+        identityVerifiedAt = Date.now()
       } finally {
-        identityProbe = null;
+        identityProbe = null
       }
-    })();
+    })()
   }
 
-  return identityProbe;
+  return identityProbe
 }
 
 export interface HealthStatus {
-  status: string;
-  timestamp: string;
-  elements_count: number;
-  websocket_clients: number;
-  durable_state_enabled?: boolean;
+  status: string
+  timestamp: string
+  elements_count: number
+  websocket_clients: number
+  durable_state_enabled?: boolean
   // Identity fields (v1.1+); `stop` requires both before signaling anything
-  service?: string;
-  pid?: number;
+  service?: string
+  pid?: number
   // v2.1+: which image renderers this server can use right now
-  renderers?: { node: boolean; browser: number };
+  renderers?: { node: boolean; browser: number }
 }
 
 export async function getHealth(timeoutMs = 2000): Promise<HealthStatus> {
-  const response = await fetch(`${EXPRESS_SERVER_URL}/health`, { signal: AbortSignal.timeout(timeoutMs) });
+  const response = await fetch(`${EXPRESS_SERVER_URL}/health`, { signal: AbortSignal.timeout(timeoutMs) })
   if (!response.ok) {
-    throw new Error(`Health check failed: ${response.status}`);
+    throw new Error(`Health check failed: ${response.status}`)
   }
-  return await response.json() as HealthStatus;
+  return (await response.json()) as HealthStatus
 }
 
 export async function isDurableCanvasStateEnabled(): Promise<boolean> {
-  if (!ENABLE_CANVAS_SYNC) return false;
+  if (!ENABLE_CANVAS_SYNC) return false
   try {
-    const health = await getHealth();
-    return health.service === CANVAS_SERVICE_NAME && health.durable_state_enabled === true;
+    const health = await getHealth()
+    return health.service === CANVAS_SERVICE_NAME && health.durable_state_enabled === true
   } catch {
     // Preserve the existing import failure path when the canvas is unavailable.
     // The subsequent element request will perform the normal identity check and
     // report that the batch was rejected rather than changing import semantics.
-    return false;
+    return false
   }
 }
 
 export async function getSyncStatus(): Promise<Record<string, unknown>> {
-  return requestJson('/api/sync/status');
+  return requestJson('/api/sync/status')
 }

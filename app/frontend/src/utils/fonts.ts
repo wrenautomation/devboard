@@ -15,9 +15,15 @@ let preload: Promise<void> | null = null
 export const preloadCanvasFonts = (timeoutMs = 4000): Promise<void> => {
   preload ??= Promise.race([
     exportToCanvas({
-      elements: convertToExcalidrawElements(Object.values(FONT_FAMILY).map((fontFamily, i) => ({
-        type: 'text' as const, x: 0, y: i * 40, text: LATIN, fontFamily
-      }))),
+      elements: convertToExcalidrawElements(
+        Object.values(FONT_FAMILY).map((fontFamily, i) => ({
+          type: 'text' as const,
+          x: 0,
+          y: i * 40,
+          text: LATIN,
+          fontFamily,
+        })),
+      ),
       appState: {},
       files: null,
     }).then(() => undefined),

@@ -1,6 +1,6 @@
 // Local patch: puts library shapes on the canvas for the Icons panel and the Library sidebar.
 // Size follows the zoom: a small item shows at least MIN_PX on screen; a big one keeps its own size on screen.
-import { restoreElements, CaptureUpdateAction } from '@excalidraw/excalidraw'
+import { CaptureUpdateAction, restoreElements } from '@excalidraw/excalidraw'
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
 
@@ -31,10 +31,14 @@ type PackShape = ExcalidrawElement & {
 // Copies shapes with fresh ids (groups, text containers and arrow bindings remapped), scaled by k about their centre, centred at cx,cy.
 function cloneAt(shapes: readonly ExcalidrawElement[], cx: number, cy: number, k: number): ExcalidrawElement[] {
   const elements = shapes as readonly PackShape[]
-  const id = remap(), gid = remap()
-  const x0 = Math.min(...elements.map(e => e.x)), y0 = Math.min(...elements.map(e => e.y))
-  const x1 = Math.max(...elements.map(e => e.x + (e.width || 0))), y1 = Math.max(...elements.map(e => e.y + (e.height || 0)))
-  const mx = (x0 + x1) / 2, my = (y0 + y1) / 2
+  const id = remap(),
+    gid = remap()
+  const x0 = Math.min(...elements.map(e => e.x)),
+    y0 = Math.min(...elements.map(e => e.y))
+  const x1 = Math.max(...elements.map(e => e.x + (e.width || 0))),
+    y1 = Math.max(...elements.map(e => e.y + (e.height || 0)))
+  const mx = (x0 + x1) / 2,
+    my = (y0 + y1) / 2
   const known = new Set(elements.map(e => e.id))
   const keep = (old?: string | null) => (old && known.has(old) ? id(old) : null)
   return elements.map(e => ({
@@ -50,8 +54,14 @@ function cloneAt(shapes: readonly ExcalidrawElement[], cx: number, cy: number, k
     frameId: null,
     containerId: keep(e.containerId),
     boundElements: e.boundElements?.filter(b => known.has(b.id)).map(b => ({ ...b, id: id(b.id) })) ?? null,
-    startBinding: e.startBinding && known.has(e.startBinding.elementId) ? { ...e.startBinding, elementId: id(e.startBinding.elementId) } : null,
-    endBinding: e.endBinding && known.has(e.endBinding.elementId) ? { ...e.endBinding, elementId: id(e.endBinding.elementId) } : null,
+    startBinding:
+      e.startBinding && known.has(e.startBinding.elementId)
+        ? { ...e.startBinding, elementId: id(e.startBinding.elementId) }
+        : null,
+    endBinding:
+      e.endBinding && known.has(e.endBinding.elementId)
+        ? { ...e.endBinding, elementId: id(e.endBinding.elementId) }
+        : null,
     seed: Math.floor(Math.random() * 2 ** 31),
     version: 1,
     versionNonce: Math.floor(Math.random() * 2 ** 31),
@@ -67,8 +77,10 @@ export function placeOnCanvas(api: ExcalidrawImperativeAPI, elements: readonly E
   if (!live.length) return
   const s = api.getAppState()
   const zoom = s.zoom.value
-  const sx = at ? at.x - s.offsetLeft : s.width / 2, sy = at ? at.y - s.offsetTop : s.height / 2
-  const cx = sx / zoom - s.scrollX, cy = sy / zoom - s.scrollY
+  const sx = at ? at.x - s.offsetLeft : s.width / 2,
+    sy = at ? at.y - s.offsetTop : s.height / 2
+  const cx = sx / zoom - s.scrollX,
+    cy = sy / zoom - s.scrollY
   const side = Math.max(...live.map(e => e.x + (e.width || 0))) - Math.min(...live.map(e => e.x))
   const tall = Math.max(...live.map(e => e.y + (e.height || 0))) - Math.min(...live.map(e => e.y))
   const big = Math.max(side, tall, 1)

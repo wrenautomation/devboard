@@ -1,4 +1,4 @@
-import { type ServerElement, normalizeFontFamily } from '../types.js';
+import { normalizeFontFamily, type ServerElement } from '../types.js'
 
 // Expand the server's agent-friendly element format into real Excalidraw
 // elements: strip server metadata, add Excalidraw defaults, generate bound
@@ -14,90 +14,87 @@ export interface ExpandOptions {
   // and updatedAt instead of Math.random()/Date.now(), so repeated exports
   // of an unchanged scene are byte-identical (keeps committed .excalidraw
   // files diff-clean).
-  deterministic?: boolean;
+  deterministic?: boolean
 }
 
 // Canonical key order for exported elements: identity/geometry first, the
 // rest alphabetical — so a no-op import→export cycle is byte-identical and
 // committed .excalidraw files produce minimal git diffs.
-const KEY_ORDER = ['id', 'type', 'x', 'y', 'width', 'height'];
+const KEY_ORDER = ['id', 'type', 'x', 'y', 'width', 'height']
 export function canonicalizeKeys<T>(v: T): T {
-  if (Array.isArray(v)) return v.map(canonicalizeKeys) as T;
+  if (Array.isArray(v)) return v.map(canonicalizeKeys) as T
   if (v && typeof v === 'object') {
-    const record = v as Record<string, unknown>;
+    const record = v as Record<string, unknown>
     const keys = Object.keys(record).sort((a, b) => {
-      const ia = KEY_ORDER.indexOf(a); const ib = KEY_ORDER.indexOf(b);
-      if (ia !== -1 || ib !== -1) return (ia === -1 ? KEY_ORDER.length : ia) - (ib === -1 ? KEY_ORDER.length : ib);
-      return a < b ? -1 : 1;
-    });
-    const out: Record<string, unknown> = {};
-    for (const k of keys) out[k] = canonicalizeKeys(record[k]);
-    return out as T;
+      const ia = KEY_ORDER.indexOf(a)
+      const ib = KEY_ORDER.indexOf(b)
+      if (ia !== -1 || ib !== -1) return (ia === -1 ? KEY_ORDER.length : ia) - (ib === -1 ? KEY_ORDER.length : ib)
+      return a < b ? -1 : 1
+    })
+    const out: Record<string, unknown> = {}
+    for (const k of keys) out[k] = canonicalizeKeys(record[k])
+    return out as T
   }
-  return v;
+  return v
 }
 
 // Excalidraw orders elements by fractional-index keys that must be valid and
 // ascending as strings: an integer part whose head letter sets its length
 // ('a' + 1 base-62 digit, 'b' + 2, 'c' + 3, ...). A decimal counter ("a10",
 // "a80") fails both rules, and Excalidraw rejects the scene on load.
-const BASE62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+const BASE62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
 export function orderKey(n: number): string {
-  let digits = 1;
-  let capacity = 62;
+  let digits = 1
+  let capacity = 62
   while (n >= capacity) {
-    n -= capacity;
-    digits++;
-    capacity *= 62;
+    n -= capacity
+    digits++
+    capacity *= 62
   }
-  let key = '';
+  let key = ''
   for (let i = 0; i < digits; i++) {
-    key = BASE62[n % 62] + key;
-    n = Math.floor(n / 62);
+    key = BASE62[n % 62] + key
+    n = Math.floor(n / 62)
   }
-  return String.fromCharCode('a'.charCodeAt(0) + digits - 1) + key;
+  return String.fromCharCode('a'.charCodeAt(0) + digits - 1) + key
 }
 
 // FNV-1a 32-bit hash — stable positive int from a string
 export function fnv1a(str: string): number {
-  let h = 0x811c9dc5;
+  let h = 0x811c9dc5
   for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
+    h ^= str.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
   }
-  return h >>> 0;
+  return h >>> 0
 }
 
-export function expandElementsForExport(
-  sourceElements: ServerElement[],
-  options: ExpandOptions = {}
-): ServerElement[] {
-  const { deterministic = false } = options;
+export function expandElementsForExport(sourceElements: ServerElement[], options: ExpandOptions = {}): ServerElement[] {
+  const { deterministic = false } = options
   const seedFor = (key: string): number =>
-    deterministic ? (fnv1a(key) % 2147483646) + 1 : Math.floor(Math.random() * 2147483647);
+    deterministic ? (fnv1a(key) % 2147483646) + 1 : Math.floor(Math.random() * 2147483647)
   const updatedFor = (el: ServerElement): number => {
-    if (!deterministic) return Date.now();
+    if (!deterministic) return Date.now()
     // Prefer a preserved `updated` (re-imported scene) over the server's
     // updatedAt, so no-op import→export cycles are byte-identical.
-    if (typeof el.updated === 'number') return el.updated;
-    const parsed = Date.parse(el.updatedAt ?? el.createdAt ?? '');
-    return Number.isNaN(parsed) ? 1 : parsed;
-  };
+    if (typeof el.updated === 'number') return el.updated
+    const parsed = Date.parse(el.updatedAt ?? el.createdAt ?? '')
+    return Number.isNaN(parsed) ? 1 : parsed
+  }
 
-  const cleanedExportElements: ServerElement[] = [];
-  const boundTextElements: ServerElement[] = [];
+  const cleanedExportElements: ServerElement[] = []
+  const boundTextElements: ServerElement[] = []
 
   // Shapes created without dimensions get the same 100x100 default the live
   // tab's skeleton converter applies, so files and headless renders agree
   // with what the canvas shows instead of collapsing to a 0x0 element.
-  const DEFAULT_DIMENSION = 100;
-  const hasOwnGeometry = (type: string) =>
-    type === 'arrow' || type === 'line' || type === 'freedraw' || type === 'text';
+  const DEFAULT_DIMENSION = 100
+  const hasOwnGeometry = (type: string) => type === 'arrow' || type === 'line' || type === 'freedraw' || type === 'text'
 
   // rest: el without its server metadata and agent shorthand (the destructuring below)
   function makeBaseElement(el: ServerElement, rest: ServerElement): ServerElement {
-    const width = rest.width ?? (hasOwnGeometry(el.type) ? undefined : DEFAULT_DIMENSION);
-    const height = rest.height ?? (hasOwnGeometry(el.type) ? undefined : DEFAULT_DIMENSION);
+    const width = rest.width ?? (hasOwnGeometry(el.type) ? undefined : DEFAULT_DIMENSION)
+    const height = rest.height ?? (hasOwnGeometry(el.type) ? undefined : DEFAULT_DIMENSION)
     return {
       ...rest,
       ...(width !== undefined ? { width } : {}),
@@ -112,10 +109,9 @@ export function expandElementsForExport(
       opacity: rest.opacity ?? 100,
       groupIds: rest.groupIds ?? [],
       frameId: rest.frameId ?? null,
-      roundness: rest.roundness ?? (
-        el.type === 'rectangle' || el.type === 'diamond' || el.type === 'ellipse'
-          ? { type: 3 } : null
-      ),
+      roundness:
+        rest.roundness ??
+        (el.type === 'rectangle' || el.type === 'diamond' || el.type === 'ellipse' ? { type: 3 } : null),
       seed: rest.seed ?? seedFor(`${el.id}:seed`),
       version: rest.version ?? 1,
       versionNonce: rest.versionNonce ?? seedFor(`${el.id}:nonce`),
@@ -123,27 +119,34 @@ export function expandElementsForExport(
       boundElements: rest.boundElements ?? null,
       updated: updatedFor(el),
       link: rest.link ?? null,
-      locked: rest.locked ?? false
-    };
+      locked: rest.locked ?? false,
+    }
   }
 
   for (const el of sourceElements) {
     // Strip server-only fields
     const {
-      createdAt, updatedAt, syncedAt, source: _src,
-      syncTimestamp, label, start, end, text,
+      createdAt,
+      updatedAt,
+      syncedAt,
+      source: _src,
+      syncTimestamp,
+      label,
+      start,
+      end,
+      text,
       version: _ver,
       ...rest
-    } = el;
+    } = el
 
-    const base = makeBaseElement(el, rest);
+    const base = makeBaseElement(el, rest)
 
     // Standalone text elements: keep text directly
     if (el.type === 'text') {
-      base.text = text ?? '';
-      base.originalText = text ?? '';
-      const fontSize = rest.fontSize ?? 20;
-      base.fontSize = fontSize;
+      base.text = text ?? ''
+      base.originalText = text ?? ''
+      const fontSize = rest.fontSize ?? 20
+      base.fontSize = fontSize
       // Agent-created text often has no dimensions (server stores null);
       // third-party consumers clip width-less text, so estimate like the
       // design guide does (~0.6×fontSize per char, 1.25 line height).
@@ -152,21 +155,21 @@ export function expandElementsForExport(
       // into the store — zero-size text renders invisible in consumers that
       // trust stored dimensions.
       if (!base.width || !base.height) {
-        const lines = String(base.text).split('\n');
-        const longestLine = Math.max(1, ...lines.map(l => l.length));
-        base.width = base.width || Math.ceil(longestLine * fontSize * 0.6);
-        base.height = base.height || Math.ceil(lines.length * fontSize * 1.25);
+        const lines = String(base.text).split('\n')
+        const longestLine = Math.max(1, ...lines.map(l => l.length))
+        base.width = base.width || Math.ceil(longestLine * fontSize * 0.6)
+        base.height = base.height || Math.ceil(lines.length * fontSize * 1.25)
       }
-      base.fontFamily = normalizeFontFamily(rest.fontFamily) ?? 1;
+      base.fontFamily = normalizeFontFamily(rest.fontFamily) ?? 1
       // Excalidraw's own defaults for free text, which the live canvas uses:
       // 'center' would centre the text on its estimated box once reopened.
-      base.textAlign = rest.textAlign ?? 'left';
-      base.verticalAlign = rest.verticalAlign ?? 'top';
-      base.autoResize = rest.autoResize ?? true;
-      base.lineHeight = rest.lineHeight ?? 1.25;
-      base.containerId = rest.containerId ?? null;
-      cleanedExportElements.push(base);
-      continue;
+      base.textAlign = rest.textAlign ?? 'left'
+      base.verticalAlign = rest.verticalAlign ?? 'top'
+      base.autoResize = rest.autoResize ?? true
+      base.lineHeight = rest.lineHeight ?? 1.25
+      base.containerId = rest.containerId ?? null
+      cleanedExportElements.push(base)
+      continue
     }
 
     // Arrows: preserve browser-synced bindings; for agent-created arrows the
@@ -174,64 +177,69 @@ export function expandElementsForExport(
     // by rerouteBoundArrows), so synthesize live bindings from the refs —
     // otherwise arrows don't stick to shapes when moved in Excalidraw.
     if (el.type === 'arrow' || el.type === 'line') {
-      base.points = rest.points ?? [[0, 0], [100, 0]];
-      base.lastCommittedPoint = null;
+      base.points = rest.points ?? [
+        [0, 0],
+        [100, 0],
+      ]
+      base.lastCommittedPoint = null
       if (rest.startBinding) {
-        base.startBinding = { ...rest.startBinding, fixedPoint: rest.startBinding.fixedPoint ?? null };
+        base.startBinding = { ...rest.startBinding, fixedPoint: rest.startBinding.fixedPoint ?? null }
       } else if (start?.id) {
-        base.startBinding = { elementId: start.id, focus: 0, gap: 4, fixedPoint: null };
+        base.startBinding = { elementId: start.id, focus: 0, gap: 4, fixedPoint: null }
       } else {
-        base.startBinding = null;
+        base.startBinding = null
       }
       if (rest.endBinding) {
-        base.endBinding = { ...rest.endBinding, fixedPoint: rest.endBinding.fixedPoint ?? null };
+        base.endBinding = { ...rest.endBinding, fixedPoint: rest.endBinding.fixedPoint ?? null }
       } else if (end?.id) {
-        base.endBinding = { elementId: end.id, focus: 0, gap: 4, fixedPoint: null };
+        base.endBinding = { elementId: end.id, focus: 0, gap: 4, fixedPoint: null }
       } else {
-        base.endBinding = null;
+        base.endBinding = null
       }
-      base.startArrowhead = rest.startArrowhead ?? null;
-      base.endArrowhead = rest.endArrowhead ?? (el.type === 'arrow' ? 'arrow' : null);
-      base.elbowed = rest.elbowed ?? false;
+      base.startArrowhead = rest.startArrowhead ?? null
+      base.endArrowhead = rest.endArrowhead ?? (el.type === 'arrow' ? 'arrow' : null)
+      base.elbowed = rest.elbowed ?? false
     }
 
     // Generate a bound text element for `label`/`text` on shapes and arrows —
     // unless the element already carries a bound text reference (a scene
     // synced from a browser tab, or a re-imported expanded export).
-    const labelText = label?.text || text;
-    const hasBoundText = Array.isArray(base.boundElements) &&
-      base.boundElements.some(b => b?.type === 'text');
+    const labelText = label?.text || text
+    const hasBoundText = Array.isArray(base.boundElements) && base.boundElements.some(b => b?.type === 'text')
     if (labelText && !hasBoundText) {
-      const textId = `${base.id}-label`;
+      const textId = `${base.id}-label`
       // Add binding reference to parent
       base.boundElements = [
         ...(Array.isArray(base.boundElements) ? base.boundElements : []),
-        { type: 'text', id: textId }
-      ];
+        { type: 'text', id: textId },
+      ]
 
       // Compute text position: centered in shape, or at arrow midpoint
-      let textX: number, textY: number, textW: number, textH: number;
-      const isArrow = el.type === 'arrow' || el.type === 'line';
+      let textX: number, textY: number, textW: number, textH: number
+      const isArrow = el.type === 'arrow' || el.type === 'line'
 
       if (isArrow) {
         // Position at midpoint of arrow path
-        const pts = base.points || [[0, 0], [100, 0]];
-        const [lastX, lastY] = pts[pts.length - 1] ?? [0, 0];
-        const midX = base.x + (lastX / 2);
-        const midY = base.y + (lastY / 2);
-        const labelW = Math.max(labelText.length * 10, 60);
-        textX = midX - labelW / 2;
-        textY = midY - 12;
-        textW = labelW;
-        textH = 24;
+        const pts = base.points || [
+          [0, 0],
+          [100, 0],
+        ]
+        const [lastX, lastY] = pts[pts.length - 1] ?? [0, 0]
+        const midX = base.x + lastX / 2
+        const midY = base.y + lastY / 2
+        const labelW = Math.max(labelText.length * 10, 60)
+        textX = midX - labelW / 2
+        textY = midY - 12
+        textW = labelW
+        textH = 24
       } else {
         // Center inside shape container
-        const containerW = base.width ?? 160;
-        const containerH = base.height ?? 80;
-        textX = base.x + 10;
-        textY = base.y + containerH / 4;
-        textW = containerW - 20;
-        textH = containerH / 2;
+        const containerW = base.width ?? 160
+        const containerH = base.height ?? 80
+        textX = base.x + 10
+        textY = base.y + containerH / 4
+        textW = containerW - 20
+        textH = containerH / 2
       }
 
       boundTextElements.push({
@@ -268,52 +276,49 @@ export function expandElementsForExport(
         verticalAlign: 'middle',
         autoResize: true,
         lineHeight: 1.25,
-        containerId: base.id
-      });
+        containerId: base.id,
+      })
     }
 
-    cleanedExportElements.push(base);
+    cleanedExportElements.push(base)
   }
 
   // Patch shapes' boundElements to include connected arrows
-  const shapeBoundArrows = new Map<string, { type: string; id: string }[]>();
+  const shapeBoundArrows = new Map<string, { type: string; id: string }[]>()
   for (const el of cleanedExportElements) {
     if (el.startBinding?.elementId) {
-      const arr = shapeBoundArrows.get(el.startBinding.elementId) || [];
-      arr.push({ type: 'arrow', id: el.id });
-      shapeBoundArrows.set(el.startBinding.elementId, arr);
+      const arr = shapeBoundArrows.get(el.startBinding.elementId) || []
+      arr.push({ type: 'arrow', id: el.id })
+      shapeBoundArrows.set(el.startBinding.elementId, arr)
     }
     if (el.endBinding?.elementId) {
-      const arr = shapeBoundArrows.get(el.endBinding.elementId) || [];
-      arr.push({ type: 'arrow', id: el.id });
-      shapeBoundArrows.set(el.endBinding.elementId, arr);
+      const arr = shapeBoundArrows.get(el.endBinding.elementId) || []
+      arr.push({ type: 'arrow', id: el.id })
+      shapeBoundArrows.set(el.endBinding.elementId, arr)
     }
   }
   for (const el of cleanedExportElements) {
-    const arrowBindings = shapeBoundArrows.get(el.id);
+    const arrowBindings = shapeBoundArrows.get(el.id)
     if (arrowBindings) {
       // Skip refs the element already carries (re-exported expanded scenes),
       // otherwise every export cycle appends duplicate boundElements entries.
-      const existing = new Set(
-        (Array.isArray(el.boundElements) ? el.boundElements : []).map(b => b?.id)
-      );
-      const additions = arrowBindings.filter(b => !existing.has(b.id));
+      const existing = new Set((Array.isArray(el.boundElements) ? el.boundElements : []).map(b => b?.id))
+      const additions = arrowBindings.filter(b => !existing.has(b.id))
       if (additions.length > 0) {
-        el.boundElements = [
-          ...(Array.isArray(el.boundElements) ? el.boundElements : []),
-          ...additions
-        ];
+        el.boundElements = [...(Array.isArray(el.boundElements) ? el.boundElements : []), ...additions]
       }
     }
   }
 
   // Append all bound text elements after their parents
-  cleanedExportElements.push(...boundTextElements);
+  cleanedExportElements.push(...boundTextElements)
 
   // Keys follow the final array order, so the file's z-order matches what the
   // canvas drew. Incoming keys are replaced: a mix of kept and new keys could
   // fall out of order.
-  cleanedExportElements.forEach((el, i) => { el.index = orderKey(i); });
+  cleanedExportElements.forEach((el, i) => {
+    el.index = orderKey(i)
+  })
 
-  return deterministic ? canonicalizeKeys(cleanedExportElements) : cleanedExportElements;
+  return deterministic ? canonicalizeKeys(cleanedExportElements) : cleanedExportElements
 }

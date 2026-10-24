@@ -1,57 +1,63 @@
-import type { Tool } from '@modelcontextprotocol/server';
-import { EXCALIDRAW_ELEMENT_TYPES } from '../types.js';
+import type { Tool } from '@modelcontextprotocol/server'
+import { EXCALIDRAW_ELEMENT_TYPES } from '../types.js'
 
 // Shared by export_to_image and get_canvas_screenshot. Rendering happens
 // headless inside the canvas server by default; no browser tab is needed.
 const IMAGE_RENDER_PROPERTIES = {
   background: {
     type: 'boolean',
-    description: 'Include the background (default: true)'
+    description: 'Include the background (default: true)',
   },
   renderer: {
     type: 'string',
     enum: ['auto', 'node', 'browser'],
-    description: '"auto" (default) renders headless in the canvas server, no browser needed. "browser" asks an open canvas tab to render with Excalidraw itself (reference rendering, slower).'
+    description:
+      '"auto" (default) renders headless in the canvas server, no browser needed. "browser" asks an open canvas tab to render with Excalidraw itself (reference rendering, slower).',
   },
   dark: {
     type: 'boolean',
-    description: 'Render in dark mode (default: false)'
+    description: 'Render in dark mode (default: false)',
   },
   scale: {
     type: 'number',
-    description: 'PNG pixel scale from 1 to 4 (default: 1)'
+    description: 'PNG pixel scale from 1 to 4 (default: 1)',
   },
   padding: {
     type: 'number',
-    description: 'Padding around the drawing in px (default: 10)'
+    description: 'Padding around the drawing in px (default: 10)',
   },
   elementIds: {
     type: 'array',
     items: { type: 'string' },
-    description: 'Render only these elements (their bound labels are included)'
+    description: 'Render only these elements (their bound labels are included)',
   },
   frameId: {
     type: 'string',
-    description: 'Render a single frame, clipped to its bounds'
+    description: 'Render a single frame, clipped to its bounds',
   },
   embedScene: {
     type: 'boolean',
-    description: 'Embed the editable scene in PNG metadata (default: false; PNG only)'
-  }
-};
+    description: 'Embed the editable scene in PNG metadata (default: false; PNG only)',
+  },
+}
 
 // Tool definitions
 export const tools: Tool[] = [
   {
     name: 'create_element',
-    description: 'Create a new Excalidraw element. For arrows, use startElementId/endElementId to bind to shapes (auto-routes to edges).',
+    description:
+      'Create a new Excalidraw element. For arrows, use startElementId/endElementId to bind to shapes (auto-routes to edges).',
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'string', description: 'Custom element ID (optional, auto-generated if omitted). Use with startElementId/endElementId in batch_create_elements.' },
+        id: {
+          type: 'string',
+          description:
+            'Custom element ID (optional, auto-generated if omitted). Use with startElementId/endElementId in batch_create_elements.',
+        },
         type: {
           type: 'string',
-          enum: Object.values(EXCALIDRAW_ELEMENT_TYPES)
+          enum: Object.values(EXCALIDRAW_ELEMENT_TYPES),
         },
         x: { type: 'number' },
         y: { type: 'number' },
@@ -65,14 +71,24 @@ export const tools: Tool[] = [
         opacity: { type: 'number' },
         text: { type: 'string' },
         fontSize: { type: 'number' },
-        fontFamily: { type: ['string', 'number'], description: 'Font family: virgil/hand/handwritten (1), helvetica/sans/sans-serif (2), cascadia/mono/monospace (3), excalifont (5), nunito (6), lilita/lilita one (7), comic shanns/comic (8), or numeric ID' },
-        startElementId: { type: 'string', description: 'For arrows: ID of the element to bind the arrow start to. Arrow auto-routes to element edge.' },
-        endElementId: { type: 'string', description: 'For arrows: ID of the element to bind the arrow end to. Arrow auto-routes to element edge.' },
+        fontFamily: {
+          type: ['string', 'number'],
+          description:
+            'Font family: virgil/hand/handwritten (1), helvetica/sans/sans-serif (2), cascadia/mono/monospace (3), excalifont (5), nunito (6), lilita/lilita one (7), comic shanns/comic (8), or numeric ID',
+        },
+        startElementId: {
+          type: 'string',
+          description: 'For arrows: ID of the element to bind the arrow start to. Arrow auto-routes to element edge.',
+        },
+        endElementId: {
+          type: 'string',
+          description: 'For arrows: ID of the element to bind the arrow end to. Arrow auto-routes to element edge.',
+        },
         endArrowhead: { type: 'string', description: 'Arrowhead style at end: arrow, bar, dot, triangle, or null' },
-        startArrowhead: { type: 'string', description: 'Arrowhead style at start: arrow, bar, dot, triangle, or null' }
+        startArrowhead: { type: 'string', description: 'Arrowhead style at start: arrow, bar, dot, triangle, or null' },
       },
-      required: ['type', 'x', 'y']
-    }
+      required: ['type', 'x', 'y'],
+    },
   },
   {
     name: 'update_element',
@@ -83,7 +99,7 @@ export const tools: Tool[] = [
         id: { type: 'string' },
         type: {
           type: 'string',
-          enum: Object.values(EXCALIDRAW_ELEMENT_TYPES)
+          enum: Object.values(EXCALIDRAW_ELEMENT_TYPES),
         },
         x: { type: 'number' },
         y: { type: 'number' },
@@ -97,10 +113,14 @@ export const tools: Tool[] = [
         opacity: { type: 'number' },
         text: { type: 'string' },
         fontSize: { type: 'number' },
-        fontFamily: { type: ['string', 'number'], description: 'Font family: virgil/hand/handwritten (1), helvetica/sans/sans-serif (2), cascadia/mono/monospace (3), excalifont (5), nunito (6), lilita/lilita one (7), comic shanns/comic (8), or numeric ID' }
+        fontFamily: {
+          type: ['string', 'number'],
+          description:
+            'Font family: virgil/hand/handwritten (1), helvetica/sans/sans-serif (2), cascadia/mono/monospace (3), excalifont (5), nunito (6), lilita/lilita one (7), comic shanns/comic (8), or numeric ID',
+        },
       },
-      required: ['id']
-    }
+      required: ['id'],
+    },
   },
   {
     name: 'delete_element',
@@ -108,10 +128,10 @@ export const tools: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'string' }
+        id: { type: 'string' },
       },
-      required: ['id']
-    }
+      required: ['id'],
+    },
   },
   {
     name: 'query_elements',
@@ -121,24 +141,25 @@ export const tools: Tool[] = [
       properties: {
         type: {
           type: 'string',
-          enum: Object.values(EXCALIDRAW_ELEMENT_TYPES)
+          enum: Object.values(EXCALIDRAW_ELEMENT_TYPES),
         },
         filter: {
           type: 'object',
-          additionalProperties: true
+          additionalProperties: true,
         },
         bbox: {
           type: 'object',
-          description: 'Bounding box filter — only return elements whose origin (x, y) falls within the given coordinate range',
+          description:
+            'Bounding box filter — only return elements whose origin (x, y) falls within the given coordinate range',
           properties: {
             x_min: { type: 'number' },
             x_max: { type: 'number' },
             y_min: { type: 'number' },
-            y_max: { type: 'number' }
-          }
-        }
-      }
-    }
+            y_max: { type: 'number' },
+          },
+        },
+      },
+    },
   },
   {
     name: 'get_resource',
@@ -146,13 +167,13 @@ export const tools: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        resource: { 
-          type: 'string', 
-          enum: ['scene', 'library', 'theme', 'elements'] 
-        }
+        resource: {
+          type: 'string',
+          enum: ['scene', 'library', 'theme', 'elements'],
+        },
       },
-      required: ['resource']
-    }
+      required: ['resource'],
+    },
   },
   {
     name: 'group_elements',
@@ -160,13 +181,13 @@ export const tools: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        elementIds: { 
+        elementIds: {
           type: 'array',
-          items: { type: 'string' }
-        }
+          items: { type: 'string' },
+        },
       },
-      required: ['elementIds']
-    }
+      required: ['elementIds'],
+    },
   },
   {
     name: 'ungroup_elements',
@@ -174,10 +195,10 @@ export const tools: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        groupId: { type: 'string' }
+        groupId: { type: 'string' },
       },
-      required: ['groupId']
-    }
+      required: ['groupId'],
+    },
   },
   {
     name: 'align_elements',
@@ -185,17 +206,17 @@ export const tools: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        elementIds: { 
+        elementIds: {
           type: 'array',
-          items: { type: 'string' }
+          items: { type: 'string' },
         },
-        alignment: { 
-          type: 'string', 
-          enum: ['left', 'center', 'right', 'top', 'middle', 'bottom'] 
-        }
+        alignment: {
+          type: 'string',
+          enum: ['left', 'center', 'right', 'top', 'middle', 'bottom'],
+        },
       },
-      required: ['elementIds', 'alignment']
-    }
+      required: ['elementIds', 'alignment'],
+    },
   },
   {
     name: 'distribute_elements',
@@ -203,17 +224,17 @@ export const tools: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        elementIds: { 
+        elementIds: {
           type: 'array',
-          items: { type: 'string' }
+          items: { type: 'string' },
         },
-        direction: { 
-          type: 'string', 
-          enum: ['horizontal', 'vertical'] 
-        }
+        direction: {
+          type: 'string',
+          enum: ['horizontal', 'vertical'],
+        },
       },
-      required: ['elementIds', 'direction']
-    }
+      required: ['elementIds', 'direction'],
+    },
   },
   {
     name: 'lock_elements',
@@ -221,13 +242,13 @@ export const tools: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        elementIds: { 
+        elementIds: {
           type: 'array',
-          items: { type: 'string' }
-        }
+          items: { type: 'string' },
+        },
       },
-      required: ['elementIds']
-    }
+      required: ['elementIds'],
+    },
   },
   {
     name: 'unlock_elements',
@@ -235,13 +256,13 @@ export const tools: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        elementIds: { 
+        elementIds: {
           type: 'array',
-          items: { type: 'string' }
-        }
+          items: { type: 'string' },
+        },
       },
-      required: ['elementIds']
-    }
+      required: ['elementIds'],
+    },
   },
   {
     name: 'create_from_mermaid',
@@ -251,7 +272,7 @@ export const tools: Tool[] = [
       properties: {
         mermaidDiagram: {
           type: 'string',
-          description: 'The Mermaid diagram definition (e.g., "graph TD; A-->B; B-->C;")'
+          description: 'The Mermaid diagram definition (e.g., "graph TD; A-->B; B-->C;")',
         },
         config: {
           type: 'object',
@@ -261,26 +282,27 @@ export const tools: Tool[] = [
             flowchart: {
               type: 'object',
               properties: {
-                curve: { type: 'string', enum: ['linear', 'basis'] }
-              }
+                curve: { type: 'string', enum: ['linear', 'basis'] },
+              },
             },
             themeVariables: {
               type: 'object',
               properties: {
-                fontSize: { type: 'string' }
-              }
+                fontSize: { type: 'string' },
+              },
             },
             maxEdges: { type: 'number' },
-            maxTextSize: { type: 'number' }
-          }
-        }
+            maxTextSize: { type: 'number' },
+          },
+        },
       },
-      required: ['mermaidDiagram']
-    }
+      required: ['mermaidDiagram'],
+    },
   },
   {
     name: 'batch_create_elements',
-    description: 'Create multiple Excalidraw elements at once. For arrows, use startElementId/endElementId to bind arrows to shapes — Excalidraw auto-routes to element edges. Assign custom id to shapes so arrows can reference them.',
+    description:
+      'Create multiple Excalidraw elements at once. For arrows, use startElementId/endElementId to bind arrows to shapes — Excalidraw auto-routes to element edges. Assign custom id to shapes so arrows can reference them.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -289,10 +311,13 @@ export const tools: Tool[] = [
           items: {
             type: 'object',
             properties: {
-              id: { type: 'string', description: 'Custom element ID. Arrows can reference this via startElementId/endElementId.' },
+              id: {
+                type: 'string',
+                description: 'Custom element ID. Arrows can reference this via startElementId/endElementId.',
+              },
               type: {
                 type: 'string',
-                enum: Object.values(EXCALIDRAW_ELEMENT_TYPES)
+                enum: Object.values(EXCALIDRAW_ELEMENT_TYPES),
               },
               x: { type: 'number' },
               y: { type: 'number' },
@@ -306,18 +331,28 @@ export const tools: Tool[] = [
               opacity: { type: 'number' },
               text: { type: 'string' },
               fontSize: { type: 'number' },
-              fontFamily: { type: ['string', 'number'], description: 'Font family: virgil/hand/handwritten (1), helvetica/sans/sans-serif (2), cascadia/mono/monospace (3), excalifont (5), nunito (6), lilita/lilita one (7), comic shanns/comic (8), or numeric ID' },
+              fontFamily: {
+                type: ['string', 'number'],
+                description:
+                  'Font family: virgil/hand/handwritten (1), helvetica/sans/sans-serif (2), cascadia/mono/monospace (3), excalifont (5), nunito (6), lilita/lilita one (7), comic shanns/comic (8), or numeric ID',
+              },
               startElementId: { type: 'string', description: 'For arrows: ID of element to bind arrow start to' },
               endElementId: { type: 'string', description: 'For arrows: ID of element to bind arrow end to' },
-              endArrowhead: { type: 'string', description: 'Arrowhead style at end: arrow, bar, dot, triangle, or null' },
-              startArrowhead: { type: 'string', description: 'Arrowhead style at start: arrow, bar, dot, triangle, or null' }
+              endArrowhead: {
+                type: 'string',
+                description: 'Arrowhead style at end: arrow, bar, dot, triangle, or null',
+              },
+              startArrowhead: {
+                type: 'string',
+                description: 'Arrowhead style at start: arrow, bar, dot, triangle, or null',
+              },
             },
-            required: ['type', 'x', 'y']
-          }
-        }
+            required: ['type', 'x', 'y'],
+          },
+        },
       },
-      required: ['elements']
-    }
+      required: ['elements'],
+    },
   },
   {
     name: 'get_element',
@@ -325,74 +360,79 @@ export const tools: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'string', description: 'The element ID' }
+        id: { type: 'string', description: 'The element ID' },
       },
-      required: ['id']
-    }
+      required: ['id'],
+    },
   },
   {
     name: 'clear_canvas',
     description: 'Clear all elements from the canvas',
     inputSchema: {
       type: 'object',
-      properties: {}
-    }
+      properties: {},
+    },
   },
   {
     name: 'export_scene',
-    description: 'Export the current canvas to .excalidraw JSON format. Optionally write to a file; a path ending in .md is written in the Obsidian Excalidraw plugin format (.excalidraw.md).',
+    description:
+      'Export the current canvas to .excalidraw JSON format. Optionally write to a file; a path ending in .md is written in the Obsidian Excalidraw plugin format (.excalidraw.md).',
     inputSchema: {
       type: 'object',
       properties: {
         filePath: {
           type: 'string',
-          description: 'Optional file path to write the scene to (.excalidraw for raw JSON, .excalidraw.md for the Obsidian Excalidraw plugin format)'
-        }
-      }
-    }
+          description:
+            'Optional file path to write the scene to (.excalidraw for raw JSON, .excalidraw.md for the Obsidian Excalidraw plugin format)',
+        },
+      },
+    },
   },
   {
     name: 'import_scene',
-    description: 'Import elements and image files from .excalidraw JSON, Obsidian .excalidraw.md, a PNG with an embedded Excalidraw scene, or raw JSON data',
+    description:
+      'Import elements and image files from .excalidraw JSON, Obsidian .excalidraw.md, a PNG with an embedded Excalidraw scene, or raw JSON data',
     inputSchema: {
       type: 'object',
       properties: {
         filePath: {
           type: 'string',
-          description: 'Path to a .excalidraw JSON, Obsidian .excalidraw.md, or embedded-scene PNG file (such as .excalidraw.png)'
+          description:
+            'Path to a .excalidraw JSON, Obsidian .excalidraw.md, or embedded-scene PNG file (such as .excalidraw.png)',
         },
         data: {
           type: 'string',
-          description: 'Raw .excalidraw JSON string (alternative to filePath)'
+          description: 'Raw .excalidraw JSON string (alternative to filePath)',
         },
         mode: {
           type: 'string',
           enum: ['replace', 'merge'],
-          description: '"replace" clears canvas first, "merge" appends to existing elements'
-        }
+          description: '"replace" clears canvas first, "merge" appends to existing elements',
+        },
       },
-      required: ['mode']
-    }
+      required: ['mode'],
+    },
   },
   {
     name: 'export_to_image',
-    description: 'Export the current canvas to a PNG or SVG image. Renders headless in the canvas server (no browser tab needed); SVGs embed fonts. Set embedScene: true for a PNG that is also editable in Excalidraw.',
+    description:
+      'Export the current canvas to a PNG or SVG image. Renders headless in the canvas server (no browser tab needed); SVGs embed fonts. Set embedScene: true for a PNG that is also editable in Excalidraw.',
     inputSchema: {
       type: 'object',
       properties: {
         format: {
           type: 'string',
           enum: ['png', 'svg'],
-          description: 'Image format'
+          description: 'Image format',
         },
         filePath: {
           type: 'string',
-          description: 'Optional file path to save the image'
+          description: 'Optional file path to save the image',
         },
-        ...IMAGE_RENDER_PROPERTIES
+        ...IMAGE_RENDER_PROPERTIES,
       },
-      required: ['format']
-    }
+      required: ['format'],
+    },
   },
   {
     name: 'duplicate_elements',
@@ -403,13 +443,13 @@ export const tools: Tool[] = [
         elementIds: {
           type: 'array',
           items: { type: 'string' },
-          description: 'IDs of elements to duplicate'
+          description: 'IDs of elements to duplicate',
         },
         offsetX: { type: 'number', description: 'Horizontal offset (default: 20)' },
-        offsetY: { type: 'number', description: 'Vertical offset (default: 20)' }
+        offsetY: { type: 'number', description: 'Vertical offset (default: 20)' },
       },
-      required: ['elementIds']
-    }
+      required: ['elementIds'],
+    },
   },
   {
     name: 'snapshot_scene',
@@ -419,11 +459,11 @@ export const tools: Tool[] = [
       properties: {
         name: {
           type: 'string',
-          description: 'Name for this snapshot'
-        }
+          description: 'Name for this snapshot',
+        },
       },
-      required: ['name']
-    }
+      required: ['name'],
+    },
   },
   {
     name: 'restore_snapshot',
@@ -433,85 +473,91 @@ export const tools: Tool[] = [
       properties: {
         name: {
           type: 'string',
-          description: 'Name of the snapshot to restore'
-        }
+          description: 'Name of the snapshot to restore',
+        },
       },
-      required: ['name']
-    }
+      required: ['name'],
+    },
   },
   {
     name: 'describe_scene',
-    description: 'Get an AI-readable description of the current canvas: element types, positions, connections, labels, spatial layout, and bounding box. Use this to understand what is on the canvas before making changes.',
+    description:
+      'Get an AI-readable description of the current canvas: element types, positions, connections, labels, spatial layout, and bounding box. Use this to understand what is on the canvas before making changes.',
     inputSchema: {
       type: 'object',
-      properties: {}
-    }
+      properties: {},
+    },
   },
   {
     name: 'get_canvas_screenshot',
-    description: 'Render the current canvas to a PNG and return it as an image. Renders headless in the canvas server (no browser tab needed). Use this to visually verify what the diagram looks like.',
+    description:
+      'Render the current canvas to a PNG and return it as an image. Renders headless in the canvas server (no browser tab needed). Use this to visually verify what the diagram looks like.',
     inputSchema: {
       type: 'object',
       properties: {
-        ...IMAGE_RENDER_PROPERTIES
-      }
-    }
+        ...IMAGE_RENDER_PROPERTIES,
+      },
+    },
   },
   {
     name: 'read_diagram_guide',
-    description: 'Returns a comprehensive design guide for creating beautiful Excalidraw diagrams: color palette, sizing rules, layout patterns, arrow binding best practices, diagram templates, and anti-patterns. Call this before creating diagrams to produce professional results.',
+    description:
+      'Returns a comprehensive design guide for creating beautiful Excalidraw diagrams: color palette, sizing rules, layout patterns, arrow binding best practices, diagram templates, and anti-patterns. Call this before creating diagrams to produce professional results.',
     inputSchema: {
       type: 'object',
-      properties: {}
-    }
+      properties: {},
+    },
   },
   {
     name: 'export_to_excalidraw_url',
-    description: 'Export the current canvas to a shareable excalidraw.com URL. The diagram is encrypted and uploaded; anyone with the URL can view it. Returns the shareable link.',
+    description:
+      'Export the current canvas to a shareable excalidraw.com URL. The diagram is encrypted and uploaded; anyone with the URL can view it. Returns the shareable link.',
     inputSchema: {
       type: 'object',
-      properties: {}
-    }
+      properties: {},
+    },
   },
   {
     name: 'set_viewport',
-    description: 'Control the canvas viewport (camera). Auto-fit all elements, zoom-to-fit a subset of elements, center on a specific element, or set zoom/scroll directly. Requires the canvas frontend open in a browser.',
+    description:
+      'Control the canvas viewport (camera). Auto-fit all elements, zoom-to-fit a subset of elements, center on a specific element, or set zoom/scroll directly. Requires the canvas frontend open in a browser.',
     inputSchema: {
       type: 'object',
       properties: {
         scrollToContent: {
           type: 'boolean',
-          description: 'Auto-fit all elements in view (zoom-to-fit)'
+          description: 'Auto-fit all elements in view (zoom-to-fit)',
         },
         scrollToElementIds: {
           type: 'array',
           items: { type: 'string' },
           minItems: 1,
-          description: 'Zoom-to-fit the bounding box of one or more elements by ID; every ID must exist'
+          description: 'Zoom-to-fit the bounding box of one or more elements by ID; every ID must exist',
         },
         viewportZoomFactor: {
           type: 'number',
           exclusiveMinimum: 0,
           maximum: 1,
-          description: 'Optional fit-to-viewport zoom factor in the range (0, 1] for scrollToContent or scrollToElementIds; lower values leave more padding'
+          description:
+            'Optional fit-to-viewport zoom factor in the range (0, 1] for scrollToContent or scrollToElementIds; lower values leave more padding',
         },
         scrollToElementId: {
           type: 'string',
-          description: 'Center the view on a specific element by ID'
+          description: 'Center the view on a specific element by ID',
         },
         zoom: {
           type: 'number',
-          description: 'Zoom level (0.1–10, where 1 = 100%)'
+          description: 'Zoom level (0.1–10, where 1 = 100%)',
         },
         offsetX: {
           type: 'number',
-          description: 'Horizontal scroll offset'
+          description: 'Horizontal scroll offset',
         },
         offsetY: {
           type: 'number',
-          description: 'Vertical scroll offset'
-        }
-      }
-    }
-  }
-];
+          description: 'Vertical scroll offset',
+        },
+      },
+    },
+  },
+]

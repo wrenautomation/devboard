@@ -1,114 +1,124 @@
 export interface ExcalidrawElementBase {
-  id: string;
-  type: ExcalidrawElementType;
-  x: number;
-  y: number;
-  width?: number;
-  height?: number;
-  angle?: number;
-  strokeColor?: string;
-  backgroundColor?: string;
-  fillStyle?: string;
-  strokeWidth?: number;
-  strokeStyle?: string;
-  roughness?: number;
-  opacity?: number;
-  groupIds?: string[];
-  frameId?: string | null;
+  id: string
+  type: ExcalidrawElementType
+  x: number
+  y: number
+  width?: number
+  height?: number
+  angle?: number
+  strokeColor?: string
+  backgroundColor?: string
+  fillStyle?: string
+  strokeWidth?: number
+  strokeStyle?: string
+  roughness?: number
+  opacity?: number
+  groupIds?: string[]
+  frameId?: string | null
   roundness?: {
-    type: number;
-    value?: number;
-  } | null;
-  seed?: number;
-  versionNonce?: number;
-  isDeleted?: boolean;
-  locked?: boolean;
-  link?: string | null;
-  customData?: Record<string, unknown> | null;
-  boundElements?: readonly ExcalidrawBoundElement[] | null;
-  updated?: number;
-  containerId?: string | null;
+    type: number
+    value?: number
+  } | null
+  seed?: number
+  versionNonce?: number
+  isDeleted?: boolean
+  locked?: boolean
+  link?: string | null
+  customData?: Record<string, unknown> | null
+  boundElements?: readonly ExcalidrawBoundElement[] | null
+  updated?: number
+  containerId?: string | null
 }
 
 export interface ExcalidrawTextElement extends ExcalidrawElementBase {
-  type: 'text';
-  text: string;
-  fontSize?: number;
-  fontFamily?: number;
-  textAlign?: string;
-  verticalAlign?: string;
-  baseline?: number;
-  lineHeight?: number;
+  type: 'text'
+  text: string
+  fontSize?: number
+  fontFamily?: number
+  textAlign?: string
+  verticalAlign?: string
+  baseline?: number
+  lineHeight?: number
 }
 
 export interface ExcalidrawRectangleElement extends ExcalidrawElementBase {
-  type: 'rectangle';
-  width: number;
-  height: number;
+  type: 'rectangle'
+  width: number
+  height: number
 }
 
 export interface ExcalidrawEllipseElement extends ExcalidrawElementBase {
-  type: 'ellipse';
-  width: number;
-  height: number;
+  type: 'ellipse'
+  width: number
+  height: number
 }
 
 export interface ExcalidrawDiamondElement extends ExcalidrawElementBase {
-  type: 'diamond';
-  width: number;
-  height: number;
+  type: 'diamond'
+  width: number
+  height: number
 }
 
 export interface ExcalidrawArrowElement extends ExcalidrawElementBase {
-  type: 'arrow';
-  points: readonly [number, number][];
-  lastCommittedPoint?: readonly [number, number] | null;
-  startBinding?: ExcalidrawBinding | null;
-  endBinding?: ExcalidrawBinding | null;
-  startArrowhead?: string | null;
-  endArrowhead?: string | null;
+  type: 'arrow'
+  points: readonly [number, number][]
+  lastCommittedPoint?: readonly [number, number] | null
+  startBinding?: ExcalidrawBinding | null
+  endBinding?: ExcalidrawBinding | null
+  startArrowhead?: string | null
+  endArrowhead?: string | null
 }
 
 export interface ExcalidrawLineElement extends ExcalidrawElementBase {
-  type: 'line';
-  points: readonly [number, number][];
-  lastCommittedPoint?: readonly [number, number] | null;
-  startBinding?: ExcalidrawBinding | null;
-  endBinding?: ExcalidrawBinding | null;
+  type: 'line'
+  points: readonly [number, number][]
+  lastCommittedPoint?: readonly [number, number] | null
+  startBinding?: ExcalidrawBinding | null
+  endBinding?: ExcalidrawBinding | null
 }
 
 export interface ExcalidrawFreedrawElement extends ExcalidrawElementBase {
-  type: 'freedraw';
-  points: readonly [number, number][];
-  pressures?: readonly number[];
-  simulatePressure?: boolean;
-  lastCommittedPoint?: readonly [number, number] | null;
+  type: 'freedraw'
+  points: readonly [number, number][]
+  pressures?: readonly number[]
+  simulatePressure?: boolean
+  lastCommittedPoint?: readonly [number, number] | null
 }
 
-export type ExcalidrawElement = 
+export type ExcalidrawElement =
   | ExcalidrawTextElement
   | ExcalidrawRectangleElement
   | ExcalidrawEllipseElement
   | ExcalidrawDiamondElement
   | ExcalidrawArrowElement
   | ExcalidrawLineElement
-  | ExcalidrawFreedrawElement;
+  | ExcalidrawFreedrawElement
 
 export interface ExcalidrawBoundElement {
-  id: string;
-  type: 'text' | 'arrow';
+  id: string
+  type: 'text' | 'arrow'
 }
 
 export interface ExcalidrawBinding {
-  elementId: string;
-  focus?: number;
-  gap?: number;
-  fixedPoint?: readonly [number, number] | null;
-  mode?: string;
+  elementId: string
+  focus?: number
+  gap?: number
+  fixedPoint?: readonly [number, number] | null
+  mode?: string
 }
 
 // The kinds an agent may create (EXCALIDRAW_ELEMENT_TYPES) plus magicframe, which a tab can draw and sync.
-export type ExcalidrawElementType = 'rectangle' | 'ellipse' | 'diamond' | 'arrow' | 'text' | 'line' | 'freedraw' | 'image' | 'frame' | 'magicframe';
+export type ExcalidrawElementType =
+  | 'rectangle'
+  | 'ellipse'
+  | 'diamond'
+  | 'arrow'
+  | 'text'
+  | 'line'
+  | 'freedraw'
+  | 'image'
+  | 'frame'
+  | 'magicframe'
 
 // Excalidraw element types
 export const EXCALIDRAW_ELEMENT_TYPES: Record<string, ExcalidrawElementType> = {
@@ -120,72 +130,72 @@ export const EXCALIDRAW_ELEMENT_TYPES: Record<string, ExcalidrawElementType> = {
   FREEDRAW: 'freedraw',
   LINE: 'line',
   IMAGE: 'image',
-  FRAME: 'frame'
-} as const;
+  FRAME: 'frame',
+} as const
 
 // An element as it travels: JSON from a tab, an agent or a file, with the server's own metadata. The fields
 // the server reads are declared; every other Excalidraw field passes through the index signature untouched.
 export interface ServerElement extends Omit<ExcalidrawElementBase, 'id'> {
-  id: string;
-  type: ExcalidrawElementType;
-  index?: string | null;
-  createdAt?: string;
-  updatedAt?: string;
-  version?: number;
-  syncedAt?: string;
-  source?: string;
-  syncTimestamp?: string;
-  text?: string;
-  originalText?: string;
-  fontSize?: number;
-  fontFamily?: string | number;
+  id: string
+  type: ExcalidrawElementType
+  index?: string | null
+  createdAt?: string
+  updatedAt?: string
+  version?: number
+  syncedAt?: string
+  source?: string
+  syncTimestamp?: string
+  text?: string
+  originalText?: string
+  fontSize?: number
+  fontFamily?: string | number
   label?: {
-    text: string;
-  };
-  points?: readonly (readonly [number, number])[];
+    text: string
+  }
+  points?: readonly (readonly [number, number])[]
   // Arrow element binding: connect arrows to shapes by element ID
-  start?: { id: string };
-  end?: { id: string };
-  startBinding?: ExcalidrawBinding | null;
-  endBinding?: ExcalidrawBinding | null;
-  elbowed?: boolean;
-  startArrowhead?: string | null;
-  endArrowhead?: string | null;
+  start?: { id: string }
+  end?: { id: string }
+  startBinding?: ExcalidrawBinding | null
+  endBinding?: ExcalidrawBinding | null
+  elbowed?: boolean
+  startArrowhead?: string | null
+  endArrowhead?: string | null
   // Frames
-  name?: string | null;
+  name?: string | null
   // Images
-  fileId?: string;
-  [key: string]: unknown;
+  fileId?: string
+  [key: string]: unknown
 }
 
 // API Response types
 export interface ApiResponse<T = unknown> {
-  success: boolean;
-  data?: T;
-  error?: string;
-  message?: string;
+  success: boolean
+  data?: T
+  error?: string
+  message?: string
 }
 
 export interface ElementsResponse extends ApiResponse {
-  elements: ServerElement[];
-  count: number;
+  elements: ServerElement[]
+  count: number
 }
 
 export interface ElementResponse extends ApiResponse {
-  element: ServerElement;
+  element: ServerElement
 }
 
 export interface SyncResponse extends ApiResponse {
-  count: number;
-  syncedAt: string;
-  beforeCount: number;
-  afterCount: number;
+  count: number
+  syncedAt: string
+  beforeCount: number
+  afterCount: number
 }
 
 // WebSocket message types
 export interface WebSocketMessage {
-  type: WebSocketMessageType;
-  [key: string]: unknown;
+  type: WebSocketMessageType
+  [key: string]: unknown
 }
 
 export type WebSocketMessageType =
@@ -205,176 +215,190 @@ export type WebSocketMessageType =
   | 'file_deleted'
   | 'project_opened'
   | 'project_renamed'
-  | 'projects_changed';
+  | 'projects_changed'
 
 export interface InitialElementsMessage extends WebSocketMessage {
-  type: 'initial_elements';
-  elements: ServerElement[];
-  project?: string;
+  type: 'initial_elements'
+  elements: ServerElement[]
+  project?: string
 }
 
 export interface ElementCreatedMessage extends WebSocketMessage {
-  type: 'element_created';
-  element: ServerElement;
+  type: 'element_created'
+  element: ServerElement
 }
 
 export interface ElementUpdatedMessage extends WebSocketMessage {
-  type: 'element_updated';
-  element: ServerElement;
+  type: 'element_updated'
+  element: ServerElement
 }
 
 export interface ElementDeletedMessage extends WebSocketMessage {
-  type: 'element_deleted';
-  elementId: string;
+  type: 'element_deleted'
+  elementId: string
 }
 
 export interface BatchCreatedMessage extends WebSocketMessage {
-  type: 'elements_batch_created';
-  elements: ServerElement[];
+  type: 'elements_batch_created'
+  elements: ServerElement[]
 }
 
 export interface SyncStatusMessage extends WebSocketMessage {
-  type: 'sync_status';
-  elementCount: number;
-  timestamp: string;
+  type: 'sync_status'
+  elementCount: number
+  timestamp: string
 }
 
 export interface MermaidConvertMessage extends WebSocketMessage {
-  type: 'mermaid_convert';
-  mermaidDiagram: string;
-  config?: MermaidConfig;
-  timestamp: string;
+  type: 'mermaid_convert'
+  mermaidDiagram: string
+  config?: MermaidConfig
+  timestamp: string
 }
 
 // Mermaid conversion types
 export interface MermaidConfig {
-  startOnLoad?: boolean;
+  startOnLoad?: boolean
   flowchart?: {
-    curve?: 'linear' | 'basis';
-  };
+    curve?: 'linear' | 'basis'
+  }
   themeVariables?: {
-    fontSize?: string;
-  };
-  maxEdges?: number;
-  maxTextSize?: number;
+    fontSize?: string
+  }
+  maxEdges?: number
+  maxTextSize?: number
 }
 
 export interface MermaidConversionRequest {
-  mermaidDiagram: string;
-  config?: MermaidConfig;
+  mermaidDiagram: string
+  config?: MermaidConfig
 }
 
 export interface MermaidConversionResponse extends ApiResponse {
-  elements: ServerElement[];
-  files?: Record<string, ExcalidrawFile>;
-  count: number;
+  elements: ServerElement[]
+  files?: Record<string, ExcalidrawFile>
+  count: number
 }
 
 // Canvas cleared message
 export interface CanvasClearedMessage extends WebSocketMessage {
-  type: 'canvas_cleared';
-  timestamp: string;
+  type: 'canvas_cleared'
+  timestamp: string
 }
 
 // Image export types
-export type ImageRenderer = 'auto' | 'node' | 'browser';
+export type ImageRenderer = 'auto' | 'node' | 'browser'
 
 // Options accepted by POST /api/export/image, the CLI `screenshot` command and
 // the MCP export/screenshot tools. `auto` renders headless in the server
 // (node); `browser` uses an open canvas tab (Excalidraw's own rendering).
 export interface ExportImageOptions {
-  format: 'png' | 'svg';
-  background?: boolean;
-  renderer?: ImageRenderer;
-  dark?: boolean;
-  scale?: number;
-  padding?: number;
-  elementIds?: string[];
-  frameId?: string;
-  area?: { x: number; y: number; w: number; h: number };
-  embedFonts?: boolean;
-  embedScene?: boolean;
+  format: 'png' | 'svg'
+  background?: boolean
+  renderer?: ImageRenderer
+  dark?: boolean
+  scale?: number
+  padding?: number
+  elementIds?: string[]
+  frameId?: string
+  area?: { x: number; y: number; w: number; h: number }
+  embedFonts?: boolean
+  embedScene?: boolean
 }
 
 export interface ExportImageRequestMessage extends WebSocketMessage {
-  type: 'export_image_request';
-  requestId: string;
-  format: 'png' | 'svg';
-  background?: boolean;
-  options?: Omit<ExportImageOptions, 'format' | 'renderer'>;
+  type: 'export_image_request'
+  requestId: string
+  format: 'png' | 'svg'
+  background?: boolean
+  options?: Omit<ExportImageOptions, 'format' | 'renderer'>
 }
 
 // Viewport control types
 export interface SetViewportMessage extends WebSocketMessage {
-  type: 'set_viewport';
-  requestId: string;
-  scrollToContent?: boolean;
-  scrollToElementId?: string;
-  scrollToElementIds?: string[];
-  viewportZoomFactor?: number;
-  zoom?: number;
-  offsetX?: number;
-  offsetY?: number;
+  type: 'set_viewport'
+  requestId: string
+  scrollToContent?: boolean
+  scrollToElementId?: string
+  scrollToElementIds?: string[]
+  viewportZoomFactor?: number
+  zoom?: number
+  offsetX?: number
+  offsetY?: number
 }
 
 // Snapshot types
 export interface Snapshot {
-  name: string;
-  elements: ServerElement[];
-  createdAt: string;
+  name: string
+  elements: ServerElement[]
+  createdAt: string
 }
 
 // In-memory storage for Excalidraw elements
-export const elements = new Map<string, ServerElement>();
+export const elements = new Map<string, ServerElement>()
 
 // In-memory storage for snapshots
-export const snapshots = new Map<string, Snapshot>();
+export const snapshots = new Map<string, Snapshot>()
 
 // In-memory file storage for image elements (Excalidraw BinaryFiles)
 export interface ExcalidrawFile {
-  id: string;
-  dataURL: string;
-  mimeType: string;
-  created: number;
+  id: string
+  dataURL: string
+  mimeType: string
+  created: number
 }
-export const files = new Map<string, ExcalidrawFile>();
+export const files = new Map<string, ExcalidrawFile>()
 
 // Validation function for Excalidraw elements
 export function validateElement(element: Partial<ServerElement>): element is ServerElement {
-  const requiredFields: (keyof ServerElement)[] = ['type', 'x', 'y'];
-  const hasRequiredFields = requiredFields.every(field => field in element);
-  
+  const requiredFields: (keyof ServerElement)[] = ['type', 'x', 'y']
+  const hasRequiredFields = requiredFields.every(field => field in element)
+
   if (!hasRequiredFields) {
-    throw new Error(`Missing required fields: ${requiredFields.join(', ')}`);
+    throw new Error(`Missing required fields: ${requiredFields.join(', ')}`)
   }
 
   if (!Object.values(EXCALIDRAW_ELEMENT_TYPES).includes(element.type as ExcalidrawElementType)) {
-    throw new Error(`Invalid element type: ${element.type}`);
+    throw new Error(`Invalid element type: ${element.type}`)
   }
 
-  return true;
+  return true
 }
 
 // Helper function to generate unique IDs
 export function generateId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).substring(2);
+  return Date.now().toString(36) + Math.random().toString(36).substring(2)
 }
 
 // Normalize fontFamily from string names to numeric values that Excalidraw expects
 // Excalidraw uses: 1 = Virgil (handwritten), 2 = Helvetica (sans-serif), 3 = Cascadia (monospace)
 // 5 = Excalifont, 6 = Nunito, 7 = Lilita One, 8 = Comic Shanns
 export function normalizeFontFamily(fontFamily: string | number | undefined): number | undefined {
-  if (fontFamily === undefined) return undefined;
-  if (typeof fontFamily === 'number') return fontFamily;
+  if (fontFamily === undefined) return undefined
+  if (typeof fontFamily === 'number') return fontFamily
   const map: Record<string, number> = {
-    'virgil': 1, 'hand': 1, 'handwritten': 1,
-    'helvetica': 2, 'sans': 2, 'sans-serif': 2,
-    'cascadia': 3, 'mono': 3, 'monospace': 3,
-    'excalifont': 5,
-    'nunito': 6,
-    'lilita': 7, 'lilita one': 7,
-    'comic shanns': 8, 'comic': 8,
-    '1': 1, '2': 2, '3': 3, '5': 5, '6': 6, '7': 7, '8': 8,
-  };
-  return map[fontFamily.toLowerCase()];
+    virgil: 1,
+    hand: 1,
+    handwritten: 1,
+    helvetica: 2,
+    sans: 2,
+    'sans-serif': 2,
+    cascadia: 3,
+    mono: 3,
+    monospace: 3,
+    excalifont: 5,
+    nunito: 6,
+    lilita: 7,
+    'lilita one': 7,
+    'comic shanns': 8,
+    comic: 8,
+    '1': 1,
+    '2': 2,
+    '3': 3,
+    '5': 5,
+    '6': 6,
+    '7': 7,
+    '8': 8,
+  }
+  return map[fontFamily.toLowerCase()]
 }
