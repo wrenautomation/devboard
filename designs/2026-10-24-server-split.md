@@ -10,3 +10,11 @@ the same two names. Module state (pending exports, watchers, terminals) stays wi
 `boards.ts` (the board filesystem) sits under `ws.ts` (the scene message needs the open board),
 so `projects.ts` imports both and no module imports in a cycle. Typecheck, build and the check
 scripts are the gate before and after; the tripwire after the split: no source file over 1200 lines.
+
+## App.tsx (same day)
+
+`frontend/src/App.tsx` (1375 lines) is one component, so it splits along what is not the component:
+`store.ts` (what this browser keeps: library, replicas, image files, the last board), `export.ts` (an
+image export the server asked for, `exportForServer(api, request, ready)`), `viewport.ts` (a viewport
+change the server asked for, `applyViewport(api, request, setView)`). The WebSocket handler calls them
+and keeps the state they do not need. Pure move; vite build and the browser regression tests are the gate.
