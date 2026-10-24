@@ -4,9 +4,10 @@
 import { CaptureUpdateAction, convertToExcalidrawElements, FONT_FAMILY } from '@excalidraw/excalidraw'
 import type { ExcalidrawTextElement } from '@excalidraw/excalidraw/element/types'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
-import { Mic } from 'lucide-react'
 import { useState } from 'react'
+import { Mic } from './icons'
 import { appendSaid, canDictate, formatSpeech, useDictation } from './speech'
+import { viewCentre } from './view'
 
 const EMS = 26 // wrap width in font sizes (about 50 letters); the text rewraps when the box is resized
 
@@ -56,13 +57,13 @@ export function Voice({ api, flush }: { api: ExcalidrawImperativeAPI | null; flu
     const text = formatSpeech(draft).trim()
     if (!api || !text) return
     mic.stop()
-    const s = api.getAppState(),
-      z = s.zoom.value
-    // Centre of the visible canvas, in scene coords.
+    const s = api.getAppState()
     const fontSize = s.currentItemFontSize,
       WIDTH = EMS * fontSize
-    const x = s.width / 2 / z - s.scrollX - WIDTH / 2,
-      y = s.height / 2 / z - s.scrollY - 2 * fontSize
+    // Centred in the visible canvas.
+    const centre = viewCentre(api)
+    const x = centre.x - WIDTH / 2,
+      y = centre.y - 2 * fontSize
     const [el] = convertToExcalidrawElements([
       {
         type: 'text',

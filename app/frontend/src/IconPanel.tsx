@@ -3,23 +3,11 @@
 // Excalidraw 0.18's own library has no search.
 
 import { exportToSvg, restoreElements } from '@excalidraw/excalidraw'
-import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
 import type React from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { loadPack, type PackItem } from './api'
 import { type Drop, placeOnCanvas } from './place'
-
-type PackItem = { id: string; name: string; category: string; tags?: string; elements: readonly ExcalidrawElement[] }
-
-let packPromise: Promise<PackItem[]> | null = null
-const loadPack = () =>
-  (packPromise ??= fetch('/lib/wren.excalidrawlib')
-    .then(r => (r.ok ? r.json() : { libraryItems: [] }))
-    .then(d => d.libraryItems as PackItem[])
-    .catch(() => {
-      packPromise = null
-      return []
-    }))
 
 const previews = new Map<string, Promise<string>>()
 const preview = (item: PackItem): Promise<string> => {

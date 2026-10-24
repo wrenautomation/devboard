@@ -3,8 +3,10 @@
 import { CaptureUpdateAction, restoreElements } from '@excalidraw/excalidraw'
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
+import { nonce } from './edits'
+import { type Point, scenePoint, viewCentre } from './view'
 
-export type Drop = { x: number; y: number }
+export type Drop = Point
 
 const MIN_PX = 120
 
@@ -62,9 +64,9 @@ function cloneAt(shapes: readonly ExcalidrawElement[], cx: number, cy: number, k
       e.endBinding && known.has(e.endBinding.elementId)
         ? { ...e.endBinding, elementId: id(e.endBinding.elementId) }
         : null,
-    seed: Math.floor(Math.random() * 2 ** 31),
+    seed: nonce(),
     version: 1,
-    versionNonce: Math.floor(Math.random() * 2 ** 31),
+    versionNonce: nonce(),
     updated: Date.now(),
     isDeleted: false,
     locked: false,
@@ -75,12 +77,8 @@ function cloneAt(shapes: readonly ExcalidrawElement[], cx: number, cy: number, k
 export function placeOnCanvas(api: ExcalidrawImperativeAPI, elements: readonly ExcalidrawElement[], at?: Drop): void {
   const live = elements.filter(e => !e.isDeleted)
   if (!live.length) return
-  const s = api.getAppState()
-  const zoom = s.zoom.value
-  const sx = at ? at.x - s.offsetLeft : s.width / 2,
-    sy = at ? at.y - s.offsetTop : s.height / 2
-  const cx = sx / zoom - s.scrollX,
-    cy = sy / zoom - s.scrollY
+  const zoom = api.getAppState().zoom.value
+  const { x: cx, y: cy } = at ? scenePoint(api, at) : viewCentre(api)
   const side = Math.max(...live.map(e => e.x + (e.width || 0))) - Math.min(...live.map(e => e.x))
   const tall = Math.max(...live.map(e => e.y + (e.height || 0))) - Math.min(...live.map(e => e.y))
   const big = Math.max(side, tall, 1)
