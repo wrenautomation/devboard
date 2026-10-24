@@ -13,6 +13,7 @@ import {
 } from './core/canvas-persistence.js'
 import { isMainModule } from './core/entry.js'
 import { removePidFile, writePidFile } from './core/pidfile.js'
+import logger from './logger.js'
 import { mountElements } from './server/elements.js'
 import { mountExport } from './server/export.js'
 import { mountFiles } from './server/files.js'
@@ -23,7 +24,6 @@ import { mountSnapshots } from './server/snapshots.js'
 import { mountViewport } from './server/viewport.js'
 import { attachWebSockets, clients } from './server/ws.js'
 import { elements } from './types.js'
-import logger from './utils/logger.js'
 
 // Load environment variables
 dotenv.config()

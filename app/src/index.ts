@@ -10,7 +10,7 @@ import { ensureCanvasReadyForMcpTool } from './core/canvas-state.js'
 import { ENABLE_CANVAS_SYNC, EXCALIDRAW_NO_AUTOSTART } from './core/config.js'
 import { isMainModule } from './core/entry.js'
 import { excalidrawMcpServerFactory } from './core/mcp-server.js'
-import logger from './utils/logger.js'
+import logger from './logger.js'
 
 // Start server
 async function runServer(): Promise<StdioServerHandle> {

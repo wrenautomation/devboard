@@ -2,6 +2,7 @@ import type { Express, Request, Response } from 'express'
 import { z } from 'zod'
 import { commitCanvasMutation } from '../core/canvas-persistence.js'
 import { normalizePoints } from '../core/normalize.js'
+import logger from '../logger.js'
 import {
   type BatchCreatedMessage,
   type ElementCreatedMessage,
@@ -14,7 +15,6 @@ import {
   normalizeFontFamily,
   type ServerElement,
 } from '../types.js'
-import logger from '../utils/logger.js'
 import { CURRENT_FILE, currentProject, PROJECTS_DIR } from './boards.js'
 import { fail, mutationErrorStatus } from './reply.js'
 import { scratchBlock, scratchKept, visibleTo } from './scratch.js'

@@ -31,7 +31,7 @@
     "type-check:frontend": "tsc --noEmit -p frontend/tsconfig.json",
     "lint": "biome check --error-on-warnings ..",
     "lint:fix": "biome check --write ..",
-    "gates": "npm run lint && npm run type-check && npm run type-check:frontend",
+    "gates": "npm run lint && npm run type-check && npm run type-check:frontend && node scripts/check-file-size.mjs",
     "test:durable": "npm run build:server && node scripts/check-durable-state.mjs",
     "type-check": "npx tsc --noEmit"
   },

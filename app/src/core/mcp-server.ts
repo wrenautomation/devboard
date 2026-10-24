@@ -1,6 +1,6 @@
 import type { JsonSchemaType, McpRequestContext, McpServerFactory } from '@modelcontextprotocol/server'
 import { fromJsonSchema, McpServer } from '@modelcontextprotocol/server'
-import logger from '../utils/logger.js'
+import logger from '../logger.js'
 import { callExcalidrawTool } from './mcp-dispatch.js'
 import { tools } from './mcp-tools.js'
 import { packageVersion } from './version.js'

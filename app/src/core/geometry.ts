@@ -1,5 +1,5 @@
+import logger from '../logger.js'
 import { generateId, type ServerElement } from '../types.js'
-import logger from '../utils/logger.js'
 import {
   batchCreateElementsOnCanvas,
   getElementFromCanvas,

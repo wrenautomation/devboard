@@ -663,6 +663,8 @@ Contributions welcome!
 ## Development
 
 ```bash
+npm run gates              # biome lint + format check, both typechecks, no source file over 1200 lines
+npm run lint:fix           # let biome fix and format
 npm run type-check
 npm run build
 npm run cli -- status      # run the CLI from the local build
