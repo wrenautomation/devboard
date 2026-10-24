@@ -1,5 +1,5 @@
-import fs from 'fs';
-import { generateId, ServerElement } from '../types.js';
+import fs from 'node:fs';
+import { generateId, type ExcalidrawFile, type ServerElement } from '../types.js';
 import {
   getElements,
   getFiles,
@@ -12,9 +12,26 @@ import { sanitizeFilePath } from './normalize.js';
 import { decodeSceneInput } from './scene-input.js';
 import { expandElementsForExport } from './expand-elements.js';
 
+// A .excalidraw file: what the canvas writes and reads back (Excalidraw's own format, elements expanded).
+export interface SceneFile {
+  type?: string;
+  version?: number;
+  source?: string;
+  elements: ServerElement[];
+  appState?: { viewBackgroundColor?: string; gridSize?: number | null; [key: string]: unknown };
+  files?: Record<string, ExcalidrawFile>;
+}
+
 export interface ExportedScene {
-  scene: Record<string, any>;
+  scene: SceneFile;
   elementCount: number;
+}
+
+// Parsed scene JSON as a SceneFile: a bare element array is a scene with only elements.
+export function sceneFromJson(json: unknown): SceneFile {
+  if (Array.isArray(json)) return { elements: json as ServerElement[] };
+  const scene = (json ?? {}) as Partial<SceneFile>;
+  return { ...scene, elements: Array.isArray(scene.elements) ? scene.elements : [] };
 }
 
 // Build a .excalidraw scene JSON from the current canvas state.
@@ -27,12 +44,12 @@ export async function buildSceneFile(): Promise<ExportedScene> {
   const exportElements = expandElementsForExport(sceneElements, { deterministic: true });
 
   // Fetch files for image elements
-  let sceneFiles: Record<string, any> = {};
+  let sceneFiles: Record<string, ExcalidrawFile> = {};
   try {
     sceneFiles = await getFiles();
   } catch { /* files endpoint may not exist */ }
 
-  const excalidrawScene: Record<string, any> = {
+  const excalidrawScene: SceneFile = {
     type: 'excalidraw',
     version: 2,
     source: 'mcp-excalidraw-server',
@@ -69,12 +86,8 @@ export async function importScene(options: {
   } else {
     throw new Error('Either filePath or data must be provided');
   }
-  const sceneData: any = JSON.parse(decodeSceneInput(input));
-
-  // Extract elements from .excalidraw format or raw array
-  const importElements: ServerElement[] = Array.isArray(sceneData)
-    ? sceneData
-    : (sceneData.elements || []);
+  const sceneData = sceneFromJson(JSON.parse(decodeSceneInput(input)));
+  const importElements = sceneData.elements;
 
   if (importElements.length === 0) {
     throw new Error('No elements found in the import data');
@@ -91,7 +104,7 @@ export async function importScene(options: {
 
   let importedFileCount = 0;
   const importFiles = sceneData.files;
-  const fileList = importFiles && typeof importFiles === 'object'
+  const fileList: ExcalidrawFile[] = importFiles && typeof importFiles === 'object'
     ? Object.values(importFiles)
     : [];
   const durableStateEnabled = fileList.length > 0

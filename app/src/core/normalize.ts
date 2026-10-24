@@ -1,5 +1,5 @@
-import path from 'path';
-import { generateId, ServerElement, normalizeFontFamily } from '../types.js';
+import path from 'node:path';
+import { generateId, type ServerElement, normalizeFontFamily } from '../types.js';
 import { ALLOWED_EXPORT_DIR } from './config.js';
 
 // Safe file path validation to prevent path traversal attacks
@@ -76,7 +76,7 @@ export function prepareElement(elementData: ElementInput): ServerElement {
 
   // For bound arrows without explicit points, set a default
   if ((startElementId || endElementId) && !elementProps.points) {
-    (element as any).points = [[0, 0], [100, 0]];
+    element.points = [[0, 0], [100, 0]];
   }
 
   // Convert text to label format for Excalidraw

@@ -1,7 +1,7 @@
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
-import { fileURLToPath } from 'url';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { parseArgs, CliUsageError } from '../args.js';
 import { printJson, note } from '../util.js';
 

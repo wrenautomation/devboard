@@ -1,6 +1,6 @@
-import { deflateSync } from 'zlib';
-import { webcrypto } from 'crypto';
-import { ServerElement } from '../types.js';
+import { deflateSync } from 'node:zlib';
+import { webcrypto } from 'node:crypto';
+import type { ServerElement } from '../types.js';
 import { expandElementsForExport } from './expand-elements.js';
 
 // Excalidraw's concatBuffers: [4-byte version=1][4-byte len][chunk]...

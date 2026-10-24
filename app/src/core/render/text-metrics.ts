@@ -1,4 +1,4 @@
-import fs from 'fs';
+import fs from 'node:fs';
 import { fontFilePath, getFontEntryByFamilyName, getFontEntry, DEFAULT_FONT_FAMILY } from './fonts.js';
 
 // Text measurement for the headless renderer. jsdom has no canvas, so

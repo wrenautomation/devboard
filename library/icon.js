@@ -1,7 +1,7 @@
 // node icon.js <name> <x> <y>  → elements JSON for `draw add`: one library item, fresh ids, moved to x,y.
 // node icon.js --list          → item names
-const fs = require("fs");
-const items = JSON.parse(fs.readFileSync(__dirname + "/wren.excalidrawlib", "utf8")).libraryItems;
+const fs = require("node:fs");
+const items = JSON.parse(fs.readFileSync(`${__dirname}/wren.excalidrawlib`, "utf8")).libraryItems;
 const [name, x = 0, y = 0] = process.argv.slice(2);
 if (!name || name === "--list") { console.log([...new Set(items.map((i) => i.name))].join("\n")); process.exit(0); }
 const it = items.find((i) => i.name.toLowerCase() === name.toLowerCase()) ||

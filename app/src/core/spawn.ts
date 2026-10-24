@@ -1,5 +1,6 @@
-import { spawn } from 'child_process';
-import { fileURLToPath } from 'url';
+import { spawn } from 'node:child_process';
+import { CodedError } from './errors.js';
+import { fileURLToPath } from 'node:url';
 import logger from '../utils/logger.js';
 import { EXPRESS_SERVER_URL, ENABLE_CANVAS_SYNC, EXCALIDRAW_NO_AUTOSTART } from './config.js';
 import { getHealth, CANVAS_SERVICE_NAME, foreignServiceError, markCanvasIdentityVerified } from './canvas-client.js';
@@ -39,12 +40,11 @@ function isLoopbackUrl(): boolean {
 }
 
 function unreachableError(reason: string): Error {
-  const error = new Error(
+  return new CodedError(
     `Canvas server is not reachable at ${EXPRESS_SERVER_URL} (${reason}). ` +
-    `Start it with \`mcp-excalidraw-server start\` or \`node dist/server.js\`.`
+    `Start it with \`mcp-excalidraw-server start\` or \`node dist/server.js\`.`,
+    'CANVAS_UNREACHABLE'
   );
-  (error as any).code = 'CANVAS_UNREACHABLE';
-  return error;
 }
 
 async function healthOrNull(timeoutMs = 500) {

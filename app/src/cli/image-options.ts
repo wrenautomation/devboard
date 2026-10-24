@@ -61,11 +61,8 @@ export function imageOptionsFromFlags(flags: Flags, format: 'png' | 'svg'): Expo
   const frame = typeof frameRaw === 'string' ? frameRaw : undefined;
   if (ids && frame) throw new CliUsageError('--ids and --frame are mutually exclusive');
   const areaRaw = scalar(flags.area);
-  const nums = typeof areaRaw === 'string' ? areaRaw.split(',').map(Number) : undefined;
-  if (nums && (nums.length !== 4 || !nums.every(Number.isFinite) || nums[2]! <= 0 || nums[3]! <= 0)) {
-    throw new CliUsageError('--area needs x,y,w,h with a positive w and h');
-  }
-  if (nums && (ids || frame)) throw new CliUsageError('--area, --ids and --frame are mutually exclusive');
+  const area = typeof areaRaw === 'string' ? parseArea(areaRaw) : undefined;
+  if (area && (ids || frame)) throw new CliUsageError('--area, --ids and --frame are mutually exclusive');
   const embedScene = scalar(flags['embed-scene']) === true;
   if (embedScene && format !== 'png') throw new CliUsageError('embedScene is only supported for PNG exports');
 
@@ -79,7 +76,17 @@ export function imageOptionsFromFlags(flags: Flags, format: 'png' | 'svg'): Expo
     ...(numberFlag(flags, 'padding') !== undefined ? { padding: numberFlag(flags, 'padding') } : {}),
     ...(ids ? { elementIds: ids } : {}),
     ...(frame ? { frameId: frame } : {}),
-    ...(nums ? { area: { x: nums[0]!, y: nums[1]!, w: nums[2]!, h: nums[3]! } } : {}),
+    ...(area ? { area } : {}),
     ...(flags['no-embed-fonts'] ? { embedFonts: false } : {})
   };
+}
+
+// --area x,y,w,h in scene coordinates.
+function parseArea(raw: string): { x: number; y: number; w: number; h: number } {
+  const [x, y, w, h, ...more] = raw.split(',').map(Number);
+  if (x === undefined || y === undefined || w === undefined || h === undefined || more.length > 0 ||
+      ![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0) {
+    throw new CliUsageError('--area needs x,y,w,h with a positive w and h');
+  }
+  return { x, y, w, h };
 }

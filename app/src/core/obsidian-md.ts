@@ -13,7 +13,9 @@
 // every scene reference rewired — so files we write and files the plugin
 // re-saves stay block-reference-compatible.
 
+import type { ServerElement } from '../types.js';
 import { canonicalizeKeys } from './expand-elements.js';
+import type { SceneFile } from './scene-io.js';
 
 const ID_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 // Obsidian block ids are alphanumeric-and-dash only — an id containing "_"
@@ -54,7 +56,7 @@ function stableId8(sourceId: string, used: Set<string>): string {
   }
 }
 
-function renameElementId(elements: any[], oldId: string, newId: string): void {
+function renameElementId(elements: ServerElement[], oldId: string, newId: string): void {
   for (const el of elements) {
     if (el.id === oldId) el.id = newId;
     if (Array.isArray(el.boundElements)) {
@@ -68,7 +70,10 @@ function renameElementId(elements: any[], oldId: string, newId: string): void {
   }
 }
 
-export function wrapSceneAsObsidianMd(scene: Record<string, any>): string {
+// The plugin keeps each text element's source in `rawText`.
+type ObsidianText = ServerElement & { rawText?: string };
+
+export function wrapSceneAsObsidianMd(scene: SceneFile): string {
   if (!Array.isArray(scene.elements)) {
     throw new Error('Not an Excalidraw scene: missing elements array');
   }
@@ -77,9 +82,9 @@ export function wrapSceneAsObsidianMd(scene: Record<string, any>): string {
   wrapped.version = 2;
   wrapped.files = wrapped.files ?? {};
 
-  const used = new Set<string>(wrapped.elements.map((el: any) => el.id));
+  const used = new Set<string>(wrapped.elements.map(el => el.id));
   const entries: string[] = [];
-  for (const el of wrapped.elements) {
+  for (const el of wrapped.elements as ObsidianText[]) {
     if (el.type !== 'text' || el.isDeleted) continue;
     if (!BLOCK_ID_RE.test(el.id)) {
       const newId = stableId8(el.id, used);
@@ -90,7 +95,7 @@ export function wrapSceneAsObsidianMd(scene: Record<string, any>): string {
     if (el.rawText !== '') entries.push(`${el.rawText} ^${el.id}`);
   }
 
-  const textSection = entries.length ? entries.join('\n\n') + '\n' : '';
+  const textSection = entries.length ? `${entries.join('\n\n')}\n` : '';
   return `---
 
 excalidraw-plugin: parsed
@@ -119,17 +124,17 @@ export function extractSceneJsonFromObsidianMd(md: string): string {
   // Every line break matches `\r?\n`: files authored on Windows (or by the
   // Obsidian plugin there) use CRLF, and requiring a bare `\n` made every
   // such file fail with a misleading "No Drawing block found".
-  const compressed = md.match(/\r?\n##? Drawing\r?\n[^`]*```compressed-json\r?\n([\s\S]*?)\r?\n```/);
-  if (compressed) {
-    const json = decompressFromBase64(compressed[1]!.replace(/\s/g, ''));
+  const compressed = md.match(/\r?\n##? Drawing\r?\n[^`]*```compressed-json\r?\n([\s\S]*?)\r?\n```/)?.[1];
+  if (compressed !== undefined) {
+    const json = decompressFromBase64(compressed.replace(/\s/g, ''));
     if (!json) throw new Error('Failed to decompress the Drawing block');
     JSON.parse(json);
     return json;
   }
-  const plain = md.match(/\r?\n##? Drawing\r?\n[^`]*```json\r?\n([\s\S]*?)\r?\n```/);
-  if (plain) {
-    JSON.parse(plain[1]!);
-    return plain[1]!;
+  const plain = md.match(/\r?\n##? Drawing\r?\n[^`]*```json\r?\n([\s\S]*?)\r?\n```/)?.[1];
+  if (plain !== undefined) {
+    JSON.parse(plain);
+    return plain;
   }
   throw new Error('No Drawing block found — not an .excalidraw.md file?');
 }
@@ -161,7 +166,7 @@ function _decompress(
 
   const readBits = (n: number): number => {
     let bits = 0;
-    const maxpower = Math.pow(2, n);
+    const maxpower = 2 ** n;
     let power = 1;
     while (power !== maxpower) {
       const resb = data.val & data.position;
@@ -194,7 +199,8 @@ function _decompress(
   result.push(first);
   while (true) {
     if (data.index > length) return '';
-    switch ((c = readBits(numBits))) {
+    c = readBits(numBits);
+    switch (c) {
       case 0:
         dictionary[dictSize++] = f(readBits(8));
         c = dictSize - 1;
@@ -209,7 +215,7 @@ function _decompress(
         return result.join('');
     }
     if (enlargeIn === 0) {
-      enlargeIn = Math.pow(2, numBits);
+      enlargeIn = 2 ** numBits;
       numBits++;
     }
     if (dictionary[c] !== undefined) {
@@ -224,7 +230,7 @@ function _decompress(
     enlargeIn--;
     w = entry;
     if (enlargeIn === 0) {
-      enlargeIn = Math.pow(2, numBits);
+      enlargeIn = 2 ** numBits;
       numBits++;
     }
   }

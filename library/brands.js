@@ -1,6 +1,6 @@
 // Simple Icons → Excalidraw library items. Each icon: filled polygons (holes in white) + a label, grouped.
 // usage: node brands.js <out.excalidrawlib> <grid.excalidraw>
-const fs = require("fs");
+const fs = require("node:fs");
 const si = require("simple-icons");
 const { svgPathProperties } = require("svg-path-properties");
 
@@ -59,7 +59,7 @@ function label(text, gid, ox, oy) {
 }
 
 function brandIcon(icon, ox, oy) {
-  const gid = rid(), color = "#" + icon.hex;
+  const gid = rid(), color = `#${icon.hex}`;
   const polys = subpaths(icon.path).sort((a, b) => area(b) - area(a));
   const depth = polys.map((p, i) => polys.filter((q, j) => j < i && inside(p[0], q)).length);
   const els = polys.map((p, i) => polygon(p, depth[i] % 2 ? "#ffffff" : color, gid, ox, oy));
@@ -76,7 +76,7 @@ function badge([name, mark, color], ox, oy) {
   return [box, t, label(name, gid, ox, oy)];
 }
 
-const bySlug = new Map(Object.values(si).filter((i) => i && i.slug).map((i) => [i.slug, i]));
+const bySlug = new Map(Object.values(si).filter((i) => i?.slug).map((i) => [i.slug, i]));
 const items = [], grid = [];
 const all = [...SLUGS.map((s) => ["icon", bySlug.get(s)]), ...BADGES.map((b) => ["badge", b])];
 all.forEach(([kind, v], k) => {

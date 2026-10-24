@@ -12,41 +12,47 @@
 // Everything is installed once and the bundle is imported once per process.
 
 import { JSDOM, VirtualConsole } from 'jsdom';
+import type { ExcalidrawFile, ServerElement } from '../../../types.js';
 import { measureTextWidth } from '../text-metrics.js';
 
+// The bundle's exports, as far as the renderer calls them. Elements are the server's loose element type.
 export interface ExcalidrawNodeModule {
   exportToSvg: (opts: {
-    elements: readonly any[];
+    elements: readonly ServerElement[];
     appState?: Record<string, unknown>;
-    files: Record<string, any> | null;
+    files: Record<string, ExcalidrawFile> | null;
     exportPadding?: number;
     renderEmbeddables?: boolean;
-    exportingFrame?: any | null;
+    exportingFrame?: ServerElement | null;
     skipInliningFonts?: true;
     reuseImages?: boolean;
-  }) => Promise<any>;
+  }) => Promise<SVGSVGElement>;
   restoreElements: (
-    elements: readonly any[] | null | undefined,
-    localElements: readonly any[] | null | undefined,
+    elements: readonly ServerElement[] | null | undefined,
+    localElements: readonly ServerElement[] | null | undefined,
     opts?: { refreshDimensions?: boolean; repairBindings?: boolean }
-  ) => any[];
-  getCommonBounds: (elements: readonly any[]) => [number, number, number, number];
+  ) => ServerElement[];
+  getCommonBounds: (elements: readonly ServerElement[]) => [number, number, number, number];
   serializeAsJSON: (
-    elements: readonly any[], appState: Record<string, any>, files: Record<string, any>, type: 'local'
+    elements: readonly ServerElement[], appState: Record<string, unknown>, files: Record<string, ExcalidrawFile>, type: 'local'
   ) => string;
   elementsOverlappingBBox: (options: {
-    elements: readonly any[]; bounds: Record<string, any>; type: 'overlap';
-  }) => any[];
+    elements: readonly ServerElement[]; bounds: ServerElement; type: 'overlap';
+  }) => ServerElement[];
   FONT_FAMILY: Record<string, number>;
   // The canvas tab's own scene preparation (frontend/src/utils/scene.ts)
-  prepareServerScene: (elements: readonly any[]) => any[];
-  cleanElementForExcalidraw: (element: any) => any;
+  prepareServerScene: (elements: readonly ServerElement[]) => ServerElement[];
+  cleanElementForExcalidraw: (element: ServerElement) => ServerElement;
 }
 
-let modulePromise: Promise<ExcalidrawNodeModule> | null = null;
-let domWindow: any | null = null;
+// jsdom's window with the browser globals the exporter touches stubbed onto it; typed loosely on purpose.
+// biome-ignore lint/suspicious/noExplicitAny: the shim writes fields jsdom's Window type does not declare
+type ShimWindow = any;
 
-function installGlobals(): any {
+let modulePromise: Promise<ExcalidrawNodeModule> | null = null;
+let domWindow: ShimWindow | null = null;
+
+function installGlobals(): ShimWindow {
   if (domWindow) return domWindow;
 
   // Swallow jsdom's "not implemented" noise; real errors still surface as
@@ -57,7 +63,7 @@ function installGlobals(): any {
     url: 'http://127.0.0.1/',
     virtualConsole
   });
-  const win: any = dom.window;
+  const win: ShimWindow = dom.window;
 
   class FontFaceStub {
     family: string;
@@ -121,7 +127,7 @@ function installGlobals(): any {
     win.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
   }
 
-  const g = globalThis as any;
+  const g = globalThis as Record<string, unknown>;
   const expose = [
     'window', 'document', 'navigator', 'location', 'self', 'top', 'parent', 'frames',
     'HTMLElement', 'HTMLCanvasElement', 'HTMLImageElement', 'Image', 'SVGElement', 'SVGSVGElement',
@@ -140,7 +146,7 @@ function installGlobals(): any {
   return win;
 }
 
-export function getDomWindow(): any {
+export function getDomWindow(): ShimWindow {
   return installGlobals();
 }
 

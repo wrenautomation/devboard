@@ -55,7 +55,7 @@ process.on('uncaughtException', (error: Error) => {
   setTimeout(() => process.exit(1), 1000);
 });
 
-process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
+process.on('unhandledRejection', (reason: unknown) => {
   logger.error('Unhandled promise rejection:', reason);
   process.stderr.write(`UNHANDLED REJECTION: ${reason}\n`);
   setTimeout(() => process.exit(1), 1000);

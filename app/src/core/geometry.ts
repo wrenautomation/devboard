@@ -1,5 +1,5 @@
 import logger from '../utils/logger.js';
-import { generateId, ServerElement } from '../types.js';
+import { generateId, type ServerElement } from '../types.js';
 import {
   getElementFromCanvas,
   updateElementOnCanvas,
@@ -88,15 +88,15 @@ export async function distributeElements(
     if (el) elementsToDist.push(el);
   }
 
-  if (elementsToDist.length < 3) {
+  const [first] = elementsToDist;
+  const last = elementsToDist.at(-1);
+  if (elementsToDist.length < 3 || !first || !last) {
     throw new Error('Need at least 3 elements to distribute');
   }
 
   if (direction === 'horizontal') {
     // Sort by x position
     elementsToDist.sort((a, b) => a.x - b.x);
-    const first = elementsToDist[0]!;
-    const last = elementsToDist[elementsToDist.length - 1]!;
     const totalSpan = (last.x + (last.width || 0)) - first.x;
     const totalElementWidth = elementsToDist.reduce((sum, el) => sum + (el.width || 0), 0);
     const gap = (totalSpan - totalElementWidth) / (elementsToDist.length - 1);
@@ -109,8 +109,6 @@ export async function distributeElements(
   } else {
     // Sort by y position
     elementsToDist.sort((a, b) => a.y - b.y);
-    const first = elementsToDist[0]!;
-    const last = elementsToDist[elementsToDist.length - 1]!;
     const totalSpan = (last.y + (last.height || 0)) - first.y;
     const totalElementHeight = elementsToDist.reduce((sum, el) => sum + (el.height || 0), 0);
     const gap = (totalSpan - totalElementHeight) / (elementsToDist.length - 1);
@@ -225,7 +223,7 @@ export async function duplicateElements(
       continue;
     }
 
-    const { createdAt, updatedAt, version, syncedAt, source, syncTimestamp, ...rest } = original as any;
+    const { createdAt, updatedAt, version, syncedAt, source, syncTimestamp, ...rest } = original;
     const duplicate: ServerElement = {
       ...rest,
       id: generateId(),

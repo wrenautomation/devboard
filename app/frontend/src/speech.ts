@@ -2,7 +2,20 @@
 // Used by the Send to Claude mic and by Voice text.
 import { useRef, useState } from 'react'
 
-const Speech: any = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition
+// The Web Speech API, as much of it as this file uses (TypeScript's DOM lib leaves it out).
+type Recognizer = {
+  lang: string
+  continuous: boolean
+  interimResults: boolean
+  onresult: ((e: { resultIndex: number; results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => void) | null
+  onerror: ((e: { error: string }) => void) | null
+  onend: (() => void) | null
+  start(): void
+  stop(): void
+}
+type SpeechWindow = { SpeechRecognition?: new () => Recognizer; webkitSpeechRecognition?: new () => Recognizer }
+const speechWindow = window as unknown as SpeechWindow
+const Speech = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition
 export const canDictate = !!Speech
 
 // Spoken commands → marks. Safari often adds its own punctuation; these cover the rest.
@@ -36,7 +49,7 @@ export function formatSpeech(raw: string): string {
 export function useDictation(onText: (said: string) => void, onError: (msg: string) => void) {
   const [listening, setListening] = useState(false)
   const [interim, setInterim] = useState('')
-  const rec = useRef<any>(null)
+  const rec = useRef<Recognizer | null>(null)
   const stop = () => rec.current?.stop()
   const start = () => {
     if (!Speech || rec.current) return
@@ -44,16 +57,18 @@ export function useDictation(onText: (said: string) => void, onError: (msg: stri
     r.lang = navigator.language || 'en-US'
     r.continuous = true
     r.interimResults = true
-    r.onresult = (e: any) => {
+    r.onresult = e => {
       let done = '', wip = ''
       for (let i = e.resultIndex; i < e.results.length; i++) {
-        if (e.results[i].isFinal) done += e.results[i][0].transcript
-        else wip += e.results[i][0].transcript
+        const result = e.results[i]
+        if (!result) continue
+        if (result.isFinal) done += result[0].transcript
+        else wip += result[0].transcript
       }
       setInterim(wip)
       if (done.trim()) onText(done.trim())
     }
-    r.onerror = (e: any) => { if (e.error !== 'aborted' && e.error !== 'no-speech') onError(`Mic: ${e.error}`) }
+    r.onerror = e => { if (e.error !== 'aborted' && e.error !== 'no-speech') onError(`Mic: ${e.error}`) }
     r.onend = () => { rec.current = null; setListening(false); setInterim('') }
     rec.current = r
     r.start()

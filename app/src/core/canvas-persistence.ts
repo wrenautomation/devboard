@@ -173,12 +173,6 @@ function assertExactKeys(
   }
 }
 
-function assertFiniteNumber(value: unknown, label: string): asserts value is number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new Error(`${label} must be a finite number`);
-  }
-}
-
 function assertNonNegativeSafeInteger(
   value: unknown,
   label: string,
@@ -513,17 +507,16 @@ function readLockOwner(lockDirectory: string): LockOwner | null {
   // Removing it is safe: a concurrent acquirer whose empty shell is removed
   // will fail its owner-file write and retry without ever claiming ownership.
   if (entries.length === 0) return null;
-  if (entries.length !== 1) {
+  const ownerFileName = entries[0];
+  if (entries.length !== 1 || !ownerFileName) {
     throw new Error('Canvas data directory has an invalid lock directory');
   }
 
-  const ownerFileName = entries[0]!;
-  const match = /^owner-([0-9a-f-]{36})\.json$/.exec(ownerFileName);
-  if (!match) {
+  const tokenFromName = /^owner-([0-9a-f-]{36})\.json$/.exec(ownerFileName)?.[1];
+  if (!tokenFromName) {
     throw new Error('Canvas data directory has an invalid lock directory');
   }
 
-  const tokenFromName = match[1]!;
   const ownerPath = join(lockDirectory, ownerFileName);
   assertRegularFile(ownerPath, 'Canvas data-directory lock owner');
   let value: unknown;
@@ -873,7 +866,7 @@ function hydrateFile(record: DurableFileRecordV1): ExcalidrawFile {
 
 function replaceMap<K, V>(target: Map<K, V>, source: Map<K, V>): void {
   target.clear();
-  source.forEach((value, key) => target.set(key, value));
+  for (const [key, value] of source) target.set(key, value);
 }
 
 function captureRuntimeState(): RuntimeStateBackup {

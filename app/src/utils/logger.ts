@@ -1,7 +1,7 @@
 import winston from 'winston';
-import * as path from 'path';
-import * as fs from 'fs';
-import { homedir, tmpdir } from 'os';
+import * as path from 'node:path';
+import * as fs from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 
 /**
  * Choose a platform-compatible default log path. MCP servers are launched in

@@ -2,7 +2,7 @@
 // so a message typed there goes in with a note sent from the iPad. Each window holds GET /api/terminals open with
 // the shell pids of its terminals; the canvas sends { pid } when a note asks for Enter in that shell.
 const vscode = require('vscode')
-const http = require('http')
+const http = require('node:http')
 
 const CANVAS = process.env.DEVBOARD_CANVAS ?? 'http://127.0.0.1:3100'
 
@@ -15,18 +15,20 @@ function activate(context) {
   async function connect() {
     req?.destroy()
     const pids = (await Promise.all(vscode.window.terminals.map(t => t.processId))).filter(Boolean)
-    const mine = req = http.get(`${CANVAS}/api/terminals?pids=${pids.join(',')}`, res => {
+    const mine = http.get(`${CANVAS}/api/terminals?pids=${pids.join(',')}`, res => {
       let buf = ''
       res.setEncoding('utf8')
       res.on('data', chunk => {
         buf += chunk
-        for (let end; (end = buf.indexOf('\n\n')) >= 0; buf = buf.slice(end + 2)) {
+        for (let end = buf.indexOf('\n\n'); end >= 0; end = buf.indexOf('\n\n')) {
           const line = buf.slice(0, end).split('\n').find(l => l.startsWith('data: '))
+          buf = buf.slice(end + 2)
           if (line) { try { void press(JSON.parse(line.slice(6)).pid) } catch {} }
         }
       })
       res.on('end', () => { if (req === mine) later(5000) })
     })
+    req = mine
     mine.on('error', () => { if (req === mine) later(5000) })
   }
   context.subscriptions.push(

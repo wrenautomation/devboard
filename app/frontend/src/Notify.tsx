@@ -1,7 +1,7 @@
 // Local patch: send a note to the Claude Code sessions that run `draw watch`.
 // The note carries the text and either a marked area (a box dragged over the canvas) or the selected shapes.
 // Claude then screenshots only that part, which keeps the image small. Mic = Safari speech to text.
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
 import { Send } from 'lucide-react'
 import { BoxDraw, boxStyle, toScreen, type Box } from './BoxDraw'
@@ -87,34 +87,37 @@ export function Notify({ api, flush }: { api: ExcalidrawImperativeAPI | null; fl
           onCancel={() => { setMarking(false); setOpen(true) }} />
       )}
       {shown && <div className="nt-box nt-box-set" style={boxStyle(shown)} />}
-      <button className={`btn-secondary notify-toggle ${open ? 'on' : ''}`} onClick={() => setOpen(o => !o)} aria-expanded={open} aria-label="Send to Claude"><Send size={17} /><span className="hb-word">Send to Claude</span></button>
+      <button type="button" className={`btn-secondary notify-toggle ${open ? 'on' : ''}`} onClick={() => setOpen(o => !o)} aria-expanded={open} aria-label="Send to Claude"><Send size={17} /><span className="hb-word">Send to Claude</span></button>
       {open && (
         <div className="nt-pop">
           <div className="nt-area">
             <span>{area ? 'Area marked: Claude checks this box' : picked ? `${picked} shape${picked > 1 ? 's' : ''} selected: Claude checks these` : 'Nothing marked: Claude checks the whole canvas'}</span>
             {area
-              ? <button className="nt-mark-btn" onClick={() => setArea(null)}>Clear</button>
-              : <button className="nt-mark-btn" onClick={() => { setOpen(false); setMarking(true) }}>Mark area</button>}
+              ? <button type="button" className="nt-mark-btn" onClick={() => setArea(null)}>Clear</button>
+              : <button type="button" className="nt-mark-btn" onClick={() => { setOpen(false); setMarking(true) }}>Mark area</button>}
           </div>
           <div className="nt-text">
             <textarea value={text} onChange={e => setText(e.target.value)} placeholder="What should Claude check?" rows={4} />
             {canDictate && (
-              <button className={`nt-mic ${mic.listening ? 'on' : ''}`} onClick={mic.toggle} aria-pressed={mic.listening} title="Speak">
+              <button type="button" className={`nt-mic ${mic.listening ? 'on' : ''}`} onClick={mic.toggle} aria-pressed={mic.listening} title="Speak">
                 {mic.listening ? 'Stop' : 'Mic'}
               </button>
             )}
           </div>
           <div className="nt-to" role="radiogroup" aria-label="Send to">
+            {/* biome-ignore lint/a11y/useSemanticElements: styled buttons with the radio roles; an <input type=radio> would be a restyle */}
             <button type="button" role="radio" aria-checked={to === ''} className={to === '' ? 'on' : ''} onClick={() => setTo('')}>
               <b>All listening</b><span>{listening} session{listening === 1 ? '' : 's'}</span>
             </button>
             {sessions.map(x => (
+              // biome-ignore lint/a11y/useSemanticElements: same
               <button key={x.watch} type="button" role="radio" aria-checked={to === x.watch} className={to === x.watch ? 'on' : ''}
                 disabled={!x.listening} onClick={() => setTo(x.watch)}>
                 <b>{x.name}</b><span>{x.folder}{x.status === 'busy' ? ' · busy' : ''}{x.terminal ? ' · VS Code' : ''}{x.listening ? '' : ' · not listening'}</span>
               </button>
             ))}
             {others.map(w => (
+              // biome-ignore lint/a11y/useSemanticElements: same
               <button key={w} type="button" role="radio" aria-checked={to === w} className={to === w ? 'on' : ''} onClick={() => setTo(w)}>
                 <b>@{w}</b><span>watcher</span>
               </button>
@@ -126,7 +129,7 @@ export function Notify({ api, flush }: { api: ExcalidrawImperativeAPI | null; fl
               <span>Also send what I typed in this session on the Mac</span>
             </label>
           )}
-          <button className="nt-send" onClick={() => void send()}>Send</button>
+          <button type="button" className="nt-send" onClick={() => void send()}>Send</button>
           {status && <div className="nt-status" role="status">{status}</div>}
         </div>
       )}

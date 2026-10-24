@@ -1,6 +1,7 @@
 import logger from '../utils/logger.js';
-import { ServerElement, ExportImageOptions } from '../types.js';
+import type { ServerElement, ExcalidrawFile, ExportImageOptions } from '../types.js';
 import { EXPRESS_SERVER_URL, ENABLE_CANVAS_SYNC } from './config.js';
+import { CodedError } from './errors.js';
 
 // API Response types
 export interface ApiResponse {
@@ -18,7 +19,8 @@ export interface SyncResponse {
 }
 
 // Helper functions to sync with Express server (canvas)
-export async function syncToCanvas(operation: string, data: any): Promise<SyncResponse | null> {
+type SyncPayload = Partial<ServerElement> & { id: string } | ServerElement[];
+export async function syncToCanvas(operation: string, data: SyncPayload): Promise<SyncResponse | null> {
   if (!ENABLE_CANVAS_SYNC) {
     logger.debug('Canvas sync disabled, skipping');
     return null;
@@ -26,7 +28,8 @@ export async function syncToCanvas(operation: string, data: any): Promise<SyncRe
 
   try {
     let url: string;
-    let options: any;
+    let options: RequestInit;
+    const id = Array.isArray(data) ? '' : data.id;
 
     switch (operation) {
       case 'create':
@@ -39,7 +42,7 @@ export async function syncToCanvas(operation: string, data: any): Promise<SyncRe
         break;
 
       case 'update':
-        url = `${EXPRESS_SERVER_URL}/api/elements/${data.id}`;
+        url = `${EXPRESS_SERVER_URL}/api/elements/${id}`;
         options = {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -48,7 +51,7 @@ export async function syncToCanvas(operation: string, data: any): Promise<SyncRe
         break;
 
       case 'delete':
-        url = `${EXPRESS_SERVER_URL}/api/elements/${data.id}`;
+        url = `${EXPRESS_SERVER_URL}/api/elements/${id}`;
         options = { method: 'DELETE' };
         break;
 
@@ -115,7 +118,7 @@ export async function updateElementOnCanvas(elementData: Partial<ServerElement> 
 }
 
 // Helper to sync element deletion to canvas
-export async function deleteElementOnCanvas(elementId: string): Promise<any> {
+export async function deleteElementOnCanvas(elementId: string): Promise<SyncResponse | null> {
   const result = await syncToCanvas('delete', { id: elementId });
   return result;
 }
@@ -164,7 +167,7 @@ export async function getElementFromCanvas(elementId: string): Promise<ServerEle
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   await assertCanvasIdentity();
   const response = await fetch(`${EXPRESS_SERVER_URL}${path}`, init);
-  const data = await response.json().catch(() => null) as any;
+  const data = await response.json().catch(() => null) as { error?: string } | null;
   if (!response.ok) {
     throw new Error(data?.error || `HTTP server error: ${response.status} ${response.statusText}`);
   }
@@ -185,12 +188,12 @@ export async function clearCanvas(): Promise<ApiResponse> {
   return requestJson<ApiResponse>('/api/elements/clear', { method: 'DELETE' });
 }
 
-export async function getFiles(): Promise<Record<string, any>> {
-  const data = await requestJson<{ files?: Record<string, any> }>('/api/files');
+export async function getFiles(): Promise<Record<string, ExcalidrawFile>> {
+  const data = await requestJson<{ files?: Record<string, ExcalidrawFile> }>('/api/files');
   return data.files || {};
 }
 
-export async function postFiles(files: any[]): Promise<void> {
+export async function postFiles(files: ExcalidrawFile[]): Promise<void> {
   await requestJson('/api/files', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -227,7 +230,9 @@ export async function setViewport(params: Record<string, unknown>): Promise<{ su
   });
 }
 
-export async function saveSnapshot(name: string): Promise<any> {
+export interface SnapshotSummary { name: string; elementCount: number; createdAt: string }
+
+export async function saveSnapshot(name: string): Promise<SnapshotSummary & { success: boolean }> {
   return requestJson('/api/snapshots', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -235,7 +240,7 @@ export async function saveSnapshot(name: string): Promise<any> {
   });
 }
 
-export async function listSnapshots(): Promise<{ success: boolean; snapshots: any[]; count: number }> {
+export async function listSnapshots(): Promise<{ success: boolean; snapshots: SnapshotSummary[]; count: number }> {
   return requestJson('/api/snapshots');
 }
 
@@ -264,7 +269,8 @@ export async function createElementStrict(element: ServerElement): Promise<Serve
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(element)
   });
-  return data.element!;
+  if (!data.element) throw new Error('The canvas returned no element');
+  return data.element;
 }
 
 export async function updateElementStrict(element: Partial<ServerElement> & { id: string }): Promise<ServerElement> {
@@ -273,7 +279,8 @@ export async function updateElementStrict(element: Partial<ServerElement> & { id
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(element)
   });
-  return data.element!;
+  if (!data.element) throw new Error(`The canvas returned no element for ${element.id}`);
+  return data.element;
 }
 
 export async function deleteElementStrict(id: string): Promise<ApiResponse> {
@@ -311,14 +318,14 @@ export async function replaceElementsStrict(elements: ServerElement[]): Promise<
 // Identity marker the canvas server puts in /health (v1.1+)
 export const CANVAS_SERVICE_NAME = 'mcp-excalidraw-canvas';
 
-export function foreignServiceError(): Error {
-  const error = new Error(
+export function foreignServiceError(quiet = false): CodedError {
+  return new CodedError(
     `Something is answering at ${EXPRESS_SERVER_URL} but does not identify as this canvas server ` +
     `(a pre-1.1 canvas build or an unrelated service on the port). ` +
-    `Upgrade/stop that service, or point EXPRESS_SERVER_URL elsewhere.`
+    `Upgrade/stop that service, or point EXPRESS_SERVER_URL elsewhere.`,
+    'CANVAS_UNREACHABLE',
+    quiet
   );
-  (error as any).code = 'CANVAS_UNREACHABLE';
-  return error;
 }
 
 // Revalidating identity gate in front of every /api request: mutations must
@@ -352,12 +359,11 @@ async function assertCanvasIdentity(): Promise<void> {
           // would accept /api mutations.
           const name = (error as { name?: string })?.name;
           if (name === 'TimeoutError' || name === 'AbortError') {
-            const timeoutError = new Error(
+            throw new CodedError(
               `The service at ${EXPRESS_SERVER_URL} did not answer the /health identity probe within 1500ms — ` +
-              `refusing to send it requests.`
+              `refusing to send it requests.`,
+              'CANVAS_UNREACHABLE'
             );
-            (timeoutError as any).code = 'CANVAS_UNREACHABLE';
-            throw timeoutError;
           }
           // Connection-level unreachable (refused/reset/DNS): canvas is down
           // or booting — let the actual request fail with its own error.

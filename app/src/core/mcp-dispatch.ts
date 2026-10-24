@@ -1,11 +1,11 @@
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { z } from 'zod';
-import fs from 'fs';
+import fs from 'node:fs';
 import logger from '../utils/logger.js';
 import {
   EXCALIDRAW_ELEMENT_TYPES,
-  ServerElement,
-  ExcalidrawElementType
+  type ServerElement,
+  type ExcalidrawElementType
 } from '../types.js';
 import { EXPRESS_SERVER_URL } from './config.js';
 import {
@@ -23,7 +23,7 @@ import {
   saveSnapshot,
   getSnapshot,
   sendMermaid,
-  ApiResponse
+  type ApiResponse
 } from './canvas-client.js';
 import { sanitizeFilePath, prepareElement, prepareElementUpdate } from './normalize.js';
 import {
@@ -258,7 +258,7 @@ export async function callExcalidrawTool(
         const { resource } = params;
         logger.info('Getting resource', { resource });
 
-        let result: any;
+        let result: unknown;
         switch (resource) {
           case 'scene':
             result = {

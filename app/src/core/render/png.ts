@@ -1,5 +1,5 @@
-import { createRequire } from 'module';
-import { spawn } from 'child_process';
+import { createRequire } from 'node:module';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 // SVG -> PNG through resvg (native, prebuilt per platform, deterministic
@@ -21,11 +21,12 @@ export interface PngResult {
 
 // Loaded lazily via require: the package is CommonJS with a native addon,
 // and this keeps `import` of the renderer cheap when only SVG is requested.
-let resvgModule: any | null = null;
-function loadResvg(): any {
+type ResvgModule = typeof import('@resvg/resvg-js');
+let resvgModule: ResvgModule | null = null;
+function loadResvg(): ResvgModule {
   if (!resvgModule) {
     const require = createRequire(import.meta.url);
-    resvgModule = require('@resvg/resvg-js');
+    resvgModule = require('@resvg/resvg-js') as ResvgModule;
   }
   return resvgModule;
 }
@@ -139,7 +140,7 @@ export async function svgToPngIsolated(svg: string, options: PngOptions): Promis
     });
 
     try {
-      child.stdin.write(JSON.stringify({ svg, options }) + '\n');
+      child.stdin.write(`${JSON.stringify({ svg, options })}\n`);
       child.stdin.end();
     } catch (error) {
       finish(new Error(`Failed to send request to PNG worker: ${(error as Error).message}`));

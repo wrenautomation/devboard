@@ -1,7 +1,8 @@
 // Local patch: an X at the top-right of the selection deletes it, as one undo step.
 // Hidden while a shape is drawn, moved, resized, rotated or its text is edited.
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { getCommonBounds, newElementWith, CaptureUpdateAction } from '@excalidraw/excalidraw'
+import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
 import { X } from 'lucide-react'
 import { toScreen, type Box } from './BoxDraw'
@@ -12,7 +13,7 @@ export function SelectionDelete({ api, flush }: { api: ExcalidrawImperativeAPI |
   useEffect(() => {
     if (!api) return
     const read = () => {
-      const s = api.getAppState() as any
+      const s = api.getAppState()
       const busy = s.newElement || s.editingTextElement || s.selectedElementsAreBeingDragged || s.isResizing || s.isRotating || s.viewModeEnabled
       const sel = s.selectedElementIds
       const els = busy ? [] : api.getSceneElements().filter(e => sel[e.id])
@@ -28,8 +29,9 @@ export function SelectionDelete({ api, flush }: { api: ExcalidrawImperativeAPI |
     if (!api) return
     const sel = api.getAppState().selectedElementIds
     const gone = new Set(api.getSceneElements().filter(e => sel[e.id]).map(e => e.id))
+    const has = (id: string | null | undefined) => !!id && gone.has(id)
     // Bound labels and a frame's children go with their shape.
-    const goes = (e: any) => gone.has(e.id) || gone.has(e.containerId) || gone.has(e.frameId)
+    const goes = (e: ExcalidrawElement) => has(e.id) || has('containerId' in e ? e.containerId : null) || has(e.frameId)
     api.updateScene({
       elements: api.getSceneElementsIncludingDeleted().map(e => (!e.isDeleted && goes(e) ? newElementWith(e, { isDeleted: true }) : e)),
       appState: { selectedElementIds: {}, selectedGroupIds: {} },
@@ -41,7 +43,7 @@ export function SelectionDelete({ api, flush }: { api: ExcalidrawImperativeAPI |
   if (!at) return null
   // Above the top-right resize handle, so the two never overlap.
   return (
-    <button className="sel-delete" style={{ left: Math.min(at.x + at.w + 6, window.innerWidth - 52), top: Math.max(at.y - 44, 64) }} onClick={remove}
+    <button type="button" className="sel-delete" style={{ left: Math.min(at.x + at.w + 6, window.innerWidth - 52), top: Math.max(at.y - 44, 64) }} onClick={remove}
       onPointerDown={e => e.stopPropagation()} aria-label="Delete selected" title="Delete">
       <X size={18} />
     </button>
