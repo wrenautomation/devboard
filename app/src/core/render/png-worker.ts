@@ -38,17 +38,17 @@ function main(): void {
         throw new Error('invalid request payload');
       }
     } catch (error) {
-      process.stdout.write(JSON.stringify({ ok: false, error: `bad request: ${(error as Error).message}` }) + '\n');
+      process.stdout.write(`${JSON.stringify({ ok: false, error: `bad request: ${(error as Error).message}` })}\n`);
       process.exit(1);
     }
     try {
       const png = svgToPng(request.svg, request.options);
-      const line = JSON.stringify({
+      const line = `${JSON.stringify({
         ok: true,
         data: png.data.toString('base64'),
         width: png.width,
         height: png.height
-      }) + '\n';
+      })}\n`;
       // Do NOT process.exit() right after write(): for payloads larger than
       // the pipe buffer the write is asynchronous and exit() truncates it.
       // Exiting from the flush callback guarantees the parent sees the full
@@ -60,14 +60,14 @@ function main(): void {
         process.exit(0);
       });
     } catch (error) {
-      const line = JSON.stringify({ ok: false, error: (error as Error).message ?? String(error) }) + '\n';
+      const line = `${JSON.stringify({ ok: false, error: (error as Error).message ?? String(error) })}\n`;
       process.stdout.write(line, () => process.exit(1));
     }
   });
   // Never let an unhandled rejection escalate to a worker crash report that
   // masks the real problem — report it like a render failure instead.
   process.on('unhandledRejection', (reason) => {
-    process.stdout.write(JSON.stringify({ ok: false, error: `unhandled rejection in PNG worker: ${String(reason)}` }) + '\n');
+    process.stdout.write(`${JSON.stringify({ ok: false, error: `unhandled rejection in PNG worker: ${String(reason)}` })}\n`);
     process.exit(1);
   });
 }

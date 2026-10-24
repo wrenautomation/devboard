@@ -25,7 +25,7 @@ interface PngChunk {
 function crc32(data: Buffer, start: number, end: number): number {
   let crc = 0xffffffff;
   for (let index = start; index < end; index++) {
-    crc = CRC_TABLE[(crc ^ data[index]!) & 0xff]! ^ (crc >>> 8);
+    crc = (CRC_TABLE[(crc ^ (data[index] ?? 0)) & 0xff] ?? 0) ^ (crc >>> 8);
   }
   return (crc ^ 0xffffffff) >>> 0;
 }

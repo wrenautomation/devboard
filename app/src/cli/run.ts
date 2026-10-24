@@ -1,4 +1,5 @@
 import { CliUsageError } from './args.js';
+import { CodedError, errorCode } from '../core/errors.js';
 import { packageVersion } from '../core/version.js';
 import * as server from './commands/server.js';
 import * as elements from './commands/elements.js';
@@ -60,12 +61,12 @@ function printHelp(): void {
     '',
     'Run `mcp-excalidraw-server help <command>` for per-command usage.'
   ];
-  process.stdout.write(lines.join('\n') + '\n');
+  process.stdout.write(`${lines.join('\n')}\n`);
 }
 
 function exitCodeFor(error: unknown): number {
   if (error instanceof CliUsageError) return 2;
-  const code = (error as any)?.code;
+  const code = errorCode(error);
   if (code === 'CANVAS_UNREACHABLE') return 3;
   if (code === 'BROWSER_REQUIRED') return 4;
   return 1;
@@ -85,7 +86,7 @@ export async function runCli(argv: string[]): Promise<void> {
   }
 
   if (name === '--version' || name === '-v' || name === 'version') {
-    process.stdout.write(packageVersion() + '\n');
+    process.stdout.write(`${packageVersion()}\n`);
     return;
   }
 
@@ -99,7 +100,7 @@ export async function runCli(argv: string[]): Promise<void> {
   try {
     await command.handler(rest);
   } catch (error) {
-    if (!(error as any)?.quiet) {
+    if (!(error instanceof CodedError && error.quiet)) {
       process.stderr.write(`Error: ${(error as Error).message}\n`);
     }
     if (error instanceof CliUsageError) {

@@ -1,3 +1,4 @@
+import type { ExcalidrawFile, ServerElement } from '../../types.js';
 import { prepareScene, renderSvgWithExcalidraw, serializeSceneForPng } from './excalidraw-node/index.js';
 import { svgToPngIsolated } from './png.js';
 import { embedPngScene } from '../png-scene.js';
@@ -35,12 +36,18 @@ export interface RenderOptions {
   systemFonts?: boolean;          // PNG only: let resvg use machine fonts; default auto (non-Latin text)
 }
 
+export interface SceneAppState {
+  viewBackgroundColor?: string;
+  gridSize?: number | null;
+  [key: string]: unknown;
+}
+
 export interface RenderableScene {
   // Canvas-server elements (agent shorthand allowed) or native Excalidraw
   // elements; both are prepared the way the canvas tab prepares them.
-  elements: Record<string, any>[];
-  files: Record<string, any>;
-  appState?: Record<string, any>;
+  elements: ServerElement[];
+  files: Record<string, ExcalidrawFile>;
+  appState?: SceneAppState;
 }
 
 export interface RenderResult {
@@ -114,7 +121,7 @@ export function validateRenderOptions(options: RenderOptions): Required<Omit<Ren
 // Keep the requested elements plus the text bound to them, so a selected
 // shape still shows its label. Arrows bound to selected shapes are not pulled
 // in implicitly — the caller decides what goes in the picture.
-export function selectElements(elements: Record<string, any>[], elementIds: string[]): Record<string, any>[] {
+export function selectElements(elements: ServerElement[], elementIds: string[]): ServerElement[] {
   const wanted = new Set(elementIds);
   const byId = new Map(elements.map(el => [el.id, el]));
   const missing = elementIds.filter(id => !byId.has(id));
@@ -126,7 +133,7 @@ export function selectElements(elements: Record<string, any>[], elementIds: stri
   );
 }
 
-export function findFrame(elements: Record<string, any>[], frameId: string): Record<string, any> {
+export function findFrame(elements: ServerElement[], frameId: string): ServerElement {
   const frame = elements.find(el => el.id === frameId);
   if (!frame) throw new RenderError(`Unknown frame id: ${frameId}`, 404);
   if (frame.type !== 'frame' && frame.type !== 'magicframe') {
@@ -136,7 +143,7 @@ export function findFrame(elements: Record<string, any>[], frameId: string): Rec
 }
 
 // A frame that is not in the scene: Excalidraw's frame export then crops to the box and draws no frame.
-function areaFrame({ x, y, w, h }: Area): Record<string, any> {
+function areaFrame({ x, y, w, h }: Area): ServerElement {
   return { id: '__area', type: 'frame', x, y, width: w, height: h, angle: 0, name: null, groupIds: [], frameId: null, isDeleted: false }
 }
 

@@ -6,9 +6,9 @@
 // by `mcp-excalidraw-server install-skill`. Edit there, then run:
 //   npm run sync:skills
 
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const canonical = path.join(repoRoot, 'skills', 'excalidraw-skill');

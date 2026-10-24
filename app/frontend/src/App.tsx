@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   Excalidraw,
   convertToExcalidrawElements,
@@ -10,8 +10,8 @@ import {
   newElementWith,
   reconcileElements
 } from '@excalidraw/excalidraw'
-import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types'
-import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
+import type { ExcalidrawElement, ExcalidrawFrameLikeElement, NonDeleted } from '@excalidraw/excalidraw/element/types'
+import type { AppState, BinaryFileData, ExcalidrawImperativeAPI, LibraryItems, SceneData } from '@excalidraw/excalidraw/types'
 import type {
   LibraryPersistedData,
   LibraryPersistenceAdapter
@@ -56,7 +56,7 @@ const libraryAdapter: LibraryPersistenceAdapter = {
   load: async () => {
     try {
       const db = await libraryDb()
-      const items = await new Promise<any>((resolve, reject) => {
+      const items = await new Promise<LibraryItems | undefined>((resolve, reject) => {
         const req = db.transaction('kv').objectStore('kv').get(LIBRARY_STORAGE_KEY)
         req.onsuccess = () => resolve(req.result)
         req.onerror = () => reject(req.error)
@@ -94,7 +94,7 @@ const libraryAdapter: LibraryPersistenceAdapter = {
 // Local patch: offline first. Each board has a replica in this browser: its elements and, per element,
 // the version the Mac last confirmed (acked). An element whose version differs from its ack is pending:
 // the next push sends it. The Mac keeps the newer version of each element, so a retry is safe.
-type Replica = { elements: unknown[]; acked: Record<string, string> }
+type Replica = { elements: ExcalidrawElement[]; acked: Record<string, string> }
 const replicaKey = (project: string) => `replica:${project}`
 const stamp = (el: { version?: number; versionNonce?: number }) => `${el.version}:${el.versionNonce ?? 0}`
 // The board to open from the replica when the Mac can't be reached.
@@ -113,16 +113,19 @@ const readReplica = (project: string) => idb<Replica | undefined>('readonly', st
 const writeReplica = (project: string, r: Replica) => idb('readwrite', st => st.put(r, replicaKey(project))).catch(() => undefined)
 const dropReplica = (project: string) => idb('readwrite', st => st.delete(replicaKey(project))).catch(() => undefined)
 // Image data once per file, apart from the replica: it never changes, and it is the bulk of the bytes.
-type StoredFile = Parameters<ExcalidrawImperativeAPI['addFiles']>[0][number]
-const readFile = (id: string) => idb<StoredFile | undefined>('readonly', st => st.get(`file:${id}`)).catch(() => undefined)
-const writeFile = (f: StoredFile) => idb('readwrite', st => st.put(f, `file:${f.id}`)).catch(() => undefined)
+const readFile = (id: string) => idb<BinaryFileData | undefined>('readonly', st => st.get(`file:${id}`)).catch(() => undefined)
+const writeFile = (f: BinaryFileData) => idb('readwrite', st => st.put(f, `file:${f.id}`)).catch(() => undefined)
+// The server's files: a map by id (a scene) or a list (files_added); the canvas wants the map.
+type ServerFiles = Record<string, BinaryFileData>
+const asFileMap = (files: ServerFiles | BinaryFileData[] | undefined): ServerFiles | undefined =>
+  Array.isArray(files) ? Object.fromEntries(files.map(f => [f.id, f])) : files
 // Changes whenever any element is added, edited or deleted (Excalidraw bumps `version` on each edit).
 const sceneVersion = (els: readonly { version: number }[]): number =>
   els.reduce((sum, el) => sum + el.version, 0) * 1000 + els.length
 
 // Local patch: thumbnail of the open board for the Projects view; scratch areas are left out.
 async function postThumb(api: ExcalidrawImperativeAPI, project: string) {
-  const elements = withoutScratch(api.getSceneElements() as any[]) as any[]
+  const elements = withoutScratch(api.getSceneElements())
   if (!elements.length) return
   const blob = await exportToBlob({
     elements, files: api.getFiles(), maxWidthOrHeight: 480, mimeType: 'image/png',
@@ -154,6 +157,11 @@ interface WebSocketMessage {
   element?: ServerElement;
   elements?: ServerElement[];
   elementId?: string;
+  files?: ServerFiles | BinaryFileData[];
+  fileId?: string;
+  project?: string;
+  from?: string;
+  to?: string;
   count?: number;
   timestamp?: string;
   source?: string;
@@ -173,7 +181,8 @@ interface ApiResponse {
   success: boolean;
   elements?: ServerElement[];
   element?: ServerElement;
-  files?: Record<string, unknown>;
+  files?: ServerFiles;
+  project?: string;
   count?: number;
   error?: string;
   message?: string;
@@ -241,7 +250,7 @@ function App(): JSX.Element {
     fetch('/api/projects').then(r => (r.ok ? r.json() : null)).then(d => {
       if (d && !projectRef.current) { projectRef.current = d.current; rememberProject(d.current) }
     }).catch(() => {})
-    const onProject = (e: Event) => { projectRef.current = (e as CustomEvent<string>).detail; rememberProject(projectRef.current!) }
+    const onProject = (e: Event) => { const project = (e as CustomEvent<string>).detail; projectRef.current = project; rememberProject(project) }
     window.addEventListener('canvas-project', onProject)
     return () => window.removeEventListener('canvas-project', onProject)
   }, [])
@@ -262,7 +271,6 @@ function App(): JSX.Element {
 
   // Sync state management
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle')
-  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null)
   // Elements the Mac has not confirmed, and whether the last push failed (header text).
   const [unsent, setUnsent] = useState(0)
   const [pushFailed, setPushFailed] = useState(false)
@@ -305,9 +313,9 @@ function App(): JSX.Element {
   const canSyncScene = (): boolean =>
     sceneLoadStatusRef.current === 'ready' && websocketRef.current?.readyState === WebSocket.OPEN
 
-  const applySceneUpdateWithoutAutoSync = (
+  const applySceneUpdateWithoutAutoSync = <K extends keyof AppState>(
     api: ExcalidrawImperativeAPI,
-    scene: Parameters<ExcalidrawImperativeAPI['updateScene']>[0]
+    scene: { elements?: SceneData['elements']; appState?: Pick<AppState, K> | null; captureUpdate?: SceneData['captureUpdate'] }
   ): void => {
     suppressAutoSyncCountRef.current += 1
     try {
@@ -352,9 +360,9 @@ function App(): JSX.Element {
     }
     return projectRef.current
   }
-  const addStoredFiles = async (api: ExcalidrawImperativeAPI, els: readonly any[], have: Record<string, unknown> = {}): Promise<void> => {
+  const addStoredFiles = async (api: ExcalidrawImperativeAPI, els: readonly ExcalidrawElement[], have: ServerFiles = {}): Promise<void> => {
     const ids = [...new Set(els.flatMap(el => (el.type === 'image' && el.fileId && !have[el.fileId] ? [el.fileId] : [])))]
-    const found = (await Promise.all(ids.map(readFile))).filter(Boolean) as StoredFile[]
+    const found = (await Promise.all(ids.map(readFile))).filter((f): f is BinaryFileData => !!f)
     if (found.length) api.addFiles(found)
   }
 
@@ -366,7 +374,7 @@ function App(): JSX.Element {
     if (!api || !replica || loadedOnceRef.current || (projectRef.current && projectRef.current !== project)) return
     await addStoredFiles(api, replica.elements)
     if (loadedOnceRef.current) return
-    applySceneUpdateWithoutAutoSync(api, { elements: replica.elements as ExcalidrawElement[], captureUpdate: CaptureUpdateAction.NEVER })
+    applySceneUpdateWithoutAutoSync(api, { elements: replica.elements, captureUpdate: CaptureUpdateAction.NEVER })
     ackedRef.current = new Map(Object.entries(replica.acked))
     sceneProjectRef.current = project
     replicaVersionRef.current = sceneVersion(api.getSceneElementsIncludingDeleted())
@@ -380,7 +388,7 @@ function App(): JSX.Element {
   // there, so it goes. The base is the scene on screen only when it shows the same board; else that
   // board's replica, so one board's shapes never reach another.
   const applyLoadedScene = async (
-    incoming: readonly Partial<ExcalidrawElement>[], generation: number, files?: Record<string, unknown>, board?: string
+    incoming: readonly Partial<ExcalidrawElement>[], generation: number, files?: ServerFiles, board?: string
   ): Promise<void> => {
     if (board && board !== projectRef.current) {
       projectRef.current = board
@@ -394,11 +402,12 @@ function App(): JSX.Element {
     const replica = same || !project ? undefined : await readReplica(project)
     if (generation !== sceneGenerationRef.current) return
     const acked = same ? ackedRef.current : new Map(Object.entries(replica?.acked ?? {}))
-    const base = (same ? api.getSceneElementsIncludingDeleted() : replica?.elements ?? []) as ExcalidrawElement[]
+    const base: readonly ExcalidrawElement[] = same ? api.getSceneElementsIncludingDeleted() : replica?.elements ?? []
     const local = base.filter(el => acked.get(el.id) !== stamp(el))
     const prepared = prepareServerScene(incoming)
-    const merged = local.length
-      ? reconcileElements(local as any, prepared as any, api.getAppState()) as unknown as ExcalidrawElement[]
+    // reconcileElements wants fractional indexes and a brand on the remote side; both sides are full elements here.
+    const merged: readonly ExcalidrawElement[] = local.length
+      ? reconcileElements(local as Parameters<typeof reconcileElements>[0], prepared as unknown as Parameters<typeof reconcileElements>[1], api.getAppState())
       : prepared
     // Acked: what the Mac holds. Labels made here from an agent's shape are not on the Mac yet: they go up.
     const fromMac = new Map(incoming.map(el => [el.id, stamp(el)]))
@@ -456,7 +465,7 @@ function App(): JSX.Element {
   const applyServerScene = (
     incoming: readonly Partial<ExcalidrawElement>[],
     generation: number,
-    files?: Record<string, unknown>,
+    files?: ServerFiles,
     opts: { refreshDimensions?: boolean } = {}
   ): void => {
     showScene(prepareServerScene(incoming, opts), generation, files)
@@ -467,7 +476,7 @@ function App(): JSX.Element {
   const showScene = (
     prepared: readonly ExcalidrawElement[],
     generation: number,
-    files?: Record<string, unknown>
+    files?: ServerFiles
   ): void => {
     const api = excalidrawAPIRef.current
     if (!api || generation !== sceneGenerationRef.current) return
@@ -477,7 +486,7 @@ function App(): JSX.Element {
       ? previous.filter(el => el.isDeleted && !ids.has(el.id) && isPending(el)) : []
     try {
       if (files) {
-        api.addFiles(Object.values(files) as Parameters<typeof api.addFiles>[0])
+        api.addFiles(Object.values(files))
         rememberServerFiles(files)
       }
       applySceneUpdateWithoutAutoSync(api, { elements: [...prepared, ...unsentDeletes], captureUpdate: CaptureUpdateAction.NEVER })
@@ -504,15 +513,17 @@ function App(): JSX.Element {
     if (!api || !incoming.length) return
     const current = new Map(api.getSceneElementsIncludingDeleted().map(el => [el.id, el]))
     const newer = (a: Partial<ExcalidrawElement>, b: ExcalidrawElement) =>
-      a.version! > b.version || (a.version === b.version && (a.versionNonce ?? 0) < b.versionNonce)
+      (a.version ?? 0) > b.version || (a.version === b.version && (a.versionNonce ?? 0) < b.versionNonce)
     const take = new Map<string, Partial<ExcalidrawElement>>()
     for (const el of incoming) {
-      const cur = current.get(el.id!)
+      const id = el.id
+      if (!id) continue
+      const cur = current.get(id)
       if (cur && stamp(cur) === stamp(el)) { ackedRef.current.set(cur.id, stamp(cur)); continue }
       if (cur && isPending(cur) && !newer(el, cur)) continue
       if (!cur && el.isDeleted) continue
-      take.set(el.id!, el)
-      ackedRef.current.set(el.id!, stamp(el))
+      take.set(id, el)
+      ackedRef.current.set(id, stamp(el))
     }
     if (!take.size) return
     const next: Partial<ExcalidrawElement>[] = []
@@ -544,6 +555,7 @@ function App(): JSX.Element {
   // that arrive later, such as CJK subsets or a preload that timed out, find
   // text already measured with a fallback font, which leaves it clipped.
   // Excalidraw itself only redraws then, so re-measure once fonts load.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once at mount; the handler reads the latest state through refs
   useEffect(() => {
     const fontSet = document.fonts
     if (!fontSet?.addEventListener) return
@@ -570,6 +582,7 @@ function App(): JSX.Element {
   }, [])
 
   // WebSocket connection
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once at mount; the handlers read the latest state through refs
   useEffect(() => {
     connectWebSocket()
     return () => {
@@ -583,6 +596,7 @@ function App(): JSX.Element {
   }, [])
 
   // Load existing elements when Excalidraw API becomes available
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the API arrives; the loaders read the latest state through refs
   useEffect(() => {
     if (excalidrawAPI) {
       // initial_elements may arrive before the API exists. HTTP is the fallback;
@@ -610,7 +624,7 @@ function App(): JSX.Element {
       }
       await preloadCanvasFonts()
       if (generation !== sceneGenerationRef.current) return
-      await applyLoadedScene(result.elements.map(cleanElementForExcalidraw), generation, filesResult.files, (result as any).project)
+      await applyLoadedScene(result.elements.map(cleanElementForExcalidraw), generation, filesResult.files, result.project)
     } catch (error) {
       failSceneLoad(error, generation)
     }
@@ -692,21 +706,21 @@ function App(): JSX.Element {
             // Measure the first scene with the real fonts, not a fallback
             await preloadCanvasFonts()
             if (generation !== sceneGenerationRef.current) return
-            await applyLoadedScene(data.elements.map(cleanElementForExcalidraw), generation, (data as any).files, (data as any).project)
+            await applyLoadedScene(data.elements.map(cleanElementForExcalidraw), generation, asFileMap(data.files), data.project)
           }
           break
 
         case 'files_added':
-          if (Array.isArray((data as any).files)) {
-            excalidrawAPI.addFiles((data as any).files)
-            rememberServerFiles((data as any).files)
+          if (Array.isArray(data.files)) {
+            excalidrawAPI.addFiles(data.files)
+            rememberServerFiles(data.files)
           }
           break
 
         case 'file_deleted':
           // Upload it again if an image on the canvas still uses it
-          if (typeof (data as any).fileId === 'string') {
-            serverFileIdsRef.current.delete((data as any).fileId)
+          if (typeof data.fileId === 'string') {
+            serverFileIdsRef.current.delete(data.fileId)
           }
           break
 
@@ -744,8 +758,8 @@ function App(): JSX.Element {
           break
 
         case 'elements_merged':
-          if (!Array.isArray((data as any).elements)) throw new Error('Invalid merged elements')
-          mergeRemote((data as any).elements.map(cleanElementForExcalidraw))
+          if (!Array.isArray(data.elements)) throw new Error('Invalid merged elements')
+          mergeRemote(data.elements.map(cleanElementForExcalidraw))
           break
 
         case 'elements_synced':
@@ -761,14 +775,15 @@ function App(): JSX.Element {
           // Edits for the old project that never reached the Mac stay in its replica.
           saveReplicaNow(true)
           if (autoSyncTimerRef.current) { clearTimeout(autoSyncTimerRef.current); autoSyncTimerRef.current = null }
-          projectRef.current = (data as any).project
-          rememberProject(projectRef.current!)
+          projectRef.current = data.project ?? null
+          if (data.project) rememberProject(data.project)
           setSceneShown(false)
-          window.dispatchEvent(new CustomEvent('canvas-project', { detail: (data as any).project }))
+          window.dispatchEvent(new CustomEvent('canvas-project', { detail: data.project }))
           break
 
         case 'project_renamed': {
-          const { from, to } = data as any
+          const { from, to } = data
+          if (!from || !to) break
           if (projectRef.current === from) projectRef.current = to
           if (sceneProjectRef.current === from) sceneProjectRef.current = to
           void readReplica(from).then(r => r && writeReplica(to, r).then(() => dropReplica(from)))
@@ -799,12 +814,13 @@ function App(): JSX.Element {
               const allElements = excalidrawAPI.getSceneElements().filter(el => !hide.has(el.id))
               const wanted = opts.elementIds ? new Set(opts.elementIds) : null
               const elements = wanted
-                ? allElements.filter(el => wanted.has(el.id) || (el.type === 'text' && (el as any).containerId && wanted.has((el as any).containerId)))
+                ? allElements.filter(el => wanted.has(el.id) || (el.type === 'text' && el.containerId && wanted.has(el.containerId)))
                 : allElements
-              const exportingFrame = opts.frameId
-                ? (allElements.find(el => el.id === opts.frameId && (el.type === 'frame' || el.type === 'magicframe')) as any) ?? null
+              const isFrame = (el: NonDeleted<ExcalidrawElement>): el is NonDeleted<ExcalidrawFrameLikeElement> => el.type === 'frame' || el.type === 'magicframe'
+              const exportingFrame: ExcalidrawFrameLikeElement | null = opts.frameId
+                ? allElements.find(el => el.id === opts.frameId && isFrame(el)) as NonDeleted<ExcalidrawFrameLikeElement> | undefined ?? null
                 : opts.area // Local patch: a marked area crops like a frame that is not in the scene.
-                  ? { id: '__area', type: 'frame', x: opts.area.x, y: opts.area.y, width: opts.area.w, height: opts.area.h, angle: 0, name: null, groupIds: [], frameId: null, isDeleted: false } as any
+                  ? { id: '__area', type: 'frame', x: opts.area.x, y: opts.area.y, width: opts.area.w, height: opts.area.h, angle: 0, name: null, groupIds: [], frameId: null, isDeleted: false } as unknown as ExcalidrawFrameLikeElement
                   : null
               if (opts.frameId && !exportingFrame) throw new Error(`Unknown frame id: ${opts.frameId}`)
               let exportElements = embedScene && exportingFrame
@@ -950,17 +966,13 @@ function App(): JSX.Element {
                   throw new Error(`Element ${data.scrollToElementId} not found`)
                 }
               } else {
-                // Direct zoom/scroll control
-                const appState: any = {}
-                if (data.zoom !== undefined) {
-                  appState.zoom = { value: data.zoom }
-                }
-                if (data.offsetX !== undefined) {
-                  appState.scrollX = data.offsetX
-                }
-                if (data.offsetY !== undefined) {
-                  appState.scrollY = data.offsetY
-                }
+                // Direct zoom/scroll control. Only the keys given change: updateScene merges them,
+                // though its type asks for every key of the pick.
+                const appState = {
+                  ...(data.zoom !== undefined ? { zoom: { value: data.zoom as AppState['zoom']['value'] } } : {}),
+                  ...(data.offsetX !== undefined ? { scrollX: data.offsetX } : {}),
+                  ...(data.offsetY !== undefined ? { scrollY: data.offsetY } : {}),
+                } as Pick<AppState, 'zoom' | 'scrollX' | 'scrollY'>
                 if (Object.keys(appState).length > 0) {
                   applySceneUpdateWithoutAutoSync(excalidrawAPI, { appState })
                 }
@@ -1042,16 +1054,6 @@ function App(): JSX.Element {
     }
   }
 
-  // Format sync time display
-  const formatSyncTime = (time: Date | null): string => {
-    if (!time) return ''
-    return time.toLocaleTimeString('zh-CN', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    })
-  }
-
   // Push: send the elements the Mac has not confirmed, deletes included. Ack each by the version sent,
   // so an edit made while the request runs stays pending. Losers come back and replace ours.
   const pushAgainRef = useRef(false)
@@ -1125,7 +1127,6 @@ function App(): JSX.Element {
         saveReplicaNow(true)
         // A fresh thumbnail at most once a minute while the board changes.
         if (Date.now() - thumbAtRef.current > 60_000) { thumbAtRef.current = Date.now(); thumbSoon() }
-        setLastSyncTime(new Date())
 
         if (!silent) {
           setSyncStatus('success')
@@ -1190,7 +1191,7 @@ function App(): JSX.Element {
       {/* Header */}
       <div className="header">
         <Projects beforeSwitch={() => syncToBackend({ silent: true })} saveThumb={saveThumb} />
-        <button className={`btn-secondary icons-toggle ${iconsOpen ? 'on' : ''}`} onClick={() => setIconsOpen(o => !o)} aria-label="Icons"><Shapes size={17} /><span className="hb-word">Icons</span></button>
+        <button type="button" className={`btn-secondary icons-toggle ${iconsOpen ? 'on' : ''}`} onClick={() => setIconsOpen(o => !o)} aria-label="Icons"><Shapes size={17} /><span className="hb-word">Icons</span></button>
         <Notify api={excalidrawAPI as ExcalidrawImperativeAPI | null} flush={() => syncToBackend({ silent: true })} />
         <Voice api={excalidrawAPI as ExcalidrawImperativeAPI | null} flush={() => syncToBackend({ silent: true })} />
         <Scratch api={excalidrawAPI as ExcalidrawImperativeAPI | null} flush={() => syncToBackend({ silent: true })} />
@@ -1206,7 +1207,7 @@ function App(): JSX.Element {
             </span>
           </div>
 
-          <button className="btn-secondary" onClick={clearCanvas} disabled={!isConnected || sceneLoadStatus !== 'ready'} aria-label="Clear canvas"><Eraser size={17} /><span className="hb-word">Clear</span></button>
+          <button type="button" className="btn-secondary" onClick={clearCanvas} disabled={!isConnected || sceneLoadStatus !== 'ready'} aria-label="Clear canvas"><Eraser size={17} /><span className="hb-word">Clear</span></button>
         </div>
       </div>
 
@@ -1216,7 +1217,7 @@ function App(): JSX.Element {
             ? 'Canvas could not be loaded. Sync is paused to protect your saved scene.'
             : 'Loading canvas. Sync is paused until the scene is ready.'}</span>
           {sceneLoadStatus === 'failed' && (
-            <button className="btn-secondary" onClick={() => void loadExistingElements()}>Retry loading</button>
+            <button type="button" className="btn-secondary" onClick={() => void loadExistingElements()}>Retry loading</button>
           )}
         </div>
       )}

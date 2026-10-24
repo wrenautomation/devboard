@@ -1,5 +1,7 @@
+import type { ExcalidrawFile, ServerElement } from '../../../types.js';
 import { loadExcalidrawNode, getDomWindow } from './dom.js';
 import { fnv1a } from '../../expand-elements.js';
+import type { SceneAppState } from '../index.js';
 
 // Render a scene to SVG with Excalidraw's own exporter running under jsdom.
 
@@ -8,7 +10,7 @@ export interface ExcalidrawSvgOptions {
   viewBackgroundColor: string;
   dark: boolean;
   padding: number;
-  exportingFrame?: Record<string, any> | null;
+  exportingFrame?: ServerElement | null;
 }
 
 const SERVER_ONLY_KEYS = ['createdAt', 'updatedAt', 'syncedAt', 'source', 'syncTimestamp'];
@@ -16,7 +18,7 @@ const SERVER_ONLY_KEYS = ['createdAt', 'updatedAt', 'syncedAt', 'source', 'syncT
 // Seeds drive roughjs's hand-drawn jitter. Server elements usually carry
 // none, and Excalidraw would pick random ones — derive them from the id so
 // an unchanged scene renders byte-identically.
-function withDeterministicSeeds(element: Record<string, any>): Record<string, any> {
+function withDeterministicSeeds(element: ServerElement): ServerElement {
   const seeded = { ...element };
   for (const key of SERVER_ONLY_KEYS) delete seeded[key];
   if (typeof seeded.seed !== 'number') seeded.seed = (fnv1a(`${seeded.id}:seed`) % 2147483646) + 1;
@@ -29,17 +31,17 @@ function withDeterministicSeeds(element: Record<string, any>): Record<string, an
 // This is the tab's own preparation code (frontend/src/utils/scene.ts:
 // convertToExcalidrawElements + bound-text centering + restore), bundled in,
 // so headless renders match what the user sees.
-export async function prepareScene(elements: Record<string, any>[]): Promise<Record<string, any>[]> {
+export async function prepareScene(elements: ServerElement[]): Promise<ServerElement[]> {
   const mod = await loadExcalidrawNode();
   return mod.prepareServerScene(elements.map(withDeterministicSeeds));
 }
 
 export async function serializeSceneForPng(
-  elements: Record<string, any>[],
-  files: Record<string, any>,
-  appState: Record<string, any>,
-  exportingFrame: Record<string, any> | null,
-  sourceElements: Record<string, any>[]
+  elements: ServerElement[],
+  files: Record<string, ExcalidrawFile>,
+  appState: SceneAppState,
+  exportingFrame: ServerElement | null,
+  sourceElements: ServerElement[]
 ): Promise<string> {
   const mod = await loadExcalidrawNode();
   // Match Excalidraw's frame export, including ungrouped overlapping elements.
@@ -67,8 +69,8 @@ export async function serializeSceneForPng(
 }
 
 export async function renderSvgWithExcalidraw(
-  preparedElements: Record<string, any>[],
-  files: Record<string, any>,
+  preparedElements: ServerElement[],
+  files: Record<string, ExcalidrawFile>,
   options: ExcalidrawSvgOptions
 ): Promise<string> {
   const mod = await loadExcalidrawNode();

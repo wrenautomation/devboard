@@ -1,4 +1,4 @@
-import { ServerElement, normalizeFontFamily } from '../types.js';
+import { type ServerElement, normalizeFontFamily } from '../types.js';
 
 // Expand the server's agent-friendly element format into real Excalidraw
 // elements: strip server metadata, add Excalidraw defaults, generate bound
@@ -21,17 +21,18 @@ export interface ExpandOptions {
 // rest alphabetical — so a no-op import→export cycle is byte-identical and
 // committed .excalidraw files produce minimal git diffs.
 const KEY_ORDER = ['id', 'type', 'x', 'y', 'width', 'height'];
-export function canonicalizeKeys(v: any): any {
-  if (Array.isArray(v)) return v.map(canonicalizeKeys);
+export function canonicalizeKeys<T>(v: T): T {
+  if (Array.isArray(v)) return v.map(canonicalizeKeys) as T;
   if (v && typeof v === 'object') {
-    const keys = Object.keys(v).sort((a, b) => {
+    const record = v as Record<string, unknown>;
+    const keys = Object.keys(record).sort((a, b) => {
       const ia = KEY_ORDER.indexOf(a); const ib = KEY_ORDER.indexOf(b);
       if (ia !== -1 || ib !== -1) return (ia === -1 ? KEY_ORDER.length : ia) - (ib === -1 ? KEY_ORDER.length : ib);
       return a < b ? -1 : 1;
     });
-    const out: Record<string, any> = {};
-    for (const k of keys) out[k] = canonicalizeKeys(v[k]);
-    return out;
+    const out: Record<string, unknown> = {};
+    for (const k of keys) out[k] = canonicalizeKeys(record[k]);
+    return out as T;
   }
   return v;
 }
@@ -70,11 +71,11 @@ export function fnv1a(str: string): number {
 export function expandElementsForExport(
   sourceElements: ServerElement[],
   options: ExpandOptions = {}
-): Record<string, any>[] {
+): ServerElement[] {
   const { deterministic = false } = options;
   const seedFor = (key: string): number =>
     deterministic ? (fnv1a(key) % 2147483646) + 1 : Math.floor(Math.random() * 2147483647);
-  const updatedFor = (el: any): number => {
+  const updatedFor = (el: ServerElement): number => {
     if (!deterministic) return Date.now();
     // Prefer a preserved `updated` (re-imported scene) over the server's
     // updatedAt, so no-op import→export cycles are byte-identical.
@@ -83,8 +84,8 @@ export function expandElementsForExport(
     return Number.isNaN(parsed) ? 1 : parsed;
   };
 
-  const cleanedExportElements: Record<string, any>[] = [];
-  const boundTextElements: Record<string, any>[] = [];
+  const cleanedExportElements: ServerElement[] = [];
+  const boundTextElements: ServerElement[] = [];
 
   // Shapes created without dimensions get the same 100x100 default the live
   // tab's skeleton converter applies, so files and headless renders agree
@@ -93,7 +94,8 @@ export function expandElementsForExport(
   const hasOwnGeometry = (type: string) =>
     type === 'arrow' || type === 'line' || type === 'freedraw' || type === 'text';
 
-  function makeBaseElement(el: any, rest: any): Record<string, any> {
+  // rest: el without its server metadata and agent shorthand (the destructuring below)
+  function makeBaseElement(el: ServerElement, rest: ServerElement): ServerElement {
     const width = rest.width ?? (hasOwnGeometry(el.type) ? undefined : DEFAULT_DIMENSION);
     const height = rest.height ?? (hasOwnGeometry(el.type) ? undefined : DEFAULT_DIMENSION);
     return {
@@ -132,7 +134,7 @@ export function expandElementsForExport(
       syncTimestamp, label, start, end, text,
       version: _ver,
       ...rest
-    } = el as any;
+    } = el;
 
     const base = makeBaseElement(el, rest);
 
@@ -140,7 +142,8 @@ export function expandElementsForExport(
     if (el.type === 'text') {
       base.text = text ?? '';
       base.originalText = text ?? '';
-      base.fontSize = rest.fontSize ?? 20;
+      const fontSize = rest.fontSize ?? 20;
+      base.fontSize = fontSize;
       // Agent-created text often has no dimensions (server stores null);
       // third-party consumers clip width-less text, so estimate like the
       // design guide does (~0.6×fontSize per char, 1.25 line height).
@@ -150,9 +153,9 @@ export function expandElementsForExport(
       // trust stored dimensions.
       if (!base.width || !base.height) {
         const lines = String(base.text).split('\n');
-        const longestLine = Math.max(1, ...lines.map((l: string) => l.length));
-        base.width = base.width || Math.ceil(longestLine * base.fontSize * 0.6);
-        base.height = base.height || Math.ceil(lines.length * base.fontSize * 1.25);
+        const longestLine = Math.max(1, ...lines.map(l => l.length));
+        base.width = base.width || Math.ceil(longestLine * fontSize * 0.6);
+        base.height = base.height || Math.ceil(lines.length * fontSize * 1.25);
       }
       base.fontFamily = normalizeFontFamily(rest.fontFamily) ?? 1;
       // Excalidraw's own defaults for free text, which the live canvas uses:
@@ -197,7 +200,7 @@ export function expandElementsForExport(
     // synced from a browser tab, or a re-imported expanded export).
     const labelText = label?.text || text;
     const hasBoundText = Array.isArray(base.boundElements) &&
-      base.boundElements.some((b: any) => b?.type === 'text');
+      base.boundElements.some(b => b?.type === 'text');
     if (labelText && !hasBoundText) {
       const textId = `${base.id}-label`;
       // Add binding reference to parent
@@ -213,9 +216,9 @@ export function expandElementsForExport(
       if (isArrow) {
         // Position at midpoint of arrow path
         const pts = base.points || [[0, 0], [100, 0]];
-        const lastPt = pts[pts.length - 1];
-        const midX = base.x + (lastPt[0] / 2);
-        const midY = base.y + (lastPt[1] / 2);
+        const [lastX, lastY] = pts[pts.length - 1] ?? [0, 0];
+        const midX = base.x + (lastX / 2);
+        const midY = base.y + (lastY / 2);
         const labelW = Math.max(labelText.length * 10, 60);
         textX = midX - labelW / 2;
         textY = midY - 12;
@@ -292,7 +295,7 @@ export function expandElementsForExport(
       // Skip refs the element already carries (re-exported expanded scenes),
       // otherwise every export cycle appends duplicate boundElements entries.
       const existing = new Set(
-        (Array.isArray(el.boundElements) ? el.boundElements : []).map((b: any) => b?.id)
+        (Array.isArray(el.boundElements) ? el.boundElements : []).map(b => b?.id)
       );
       const additions = arrowBindings.filter(b => !existing.has(b.id));
       if (additions.length > 0) {

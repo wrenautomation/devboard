@@ -1,7 +1,8 @@
 import { parseArgs } from '../args.js';
+import { CodedError } from '../../core/errors.js';
 import { printJson, note } from '../util.js';
 import { ensureCanvasRunning, stopCanvas, canvasPort, isCanvasHealth, foreignServiceError } from '../../core/spawn.js';
-import { getHealth, getSyncStatus } from '../../core/canvas-client.js';
+import { getHealth, getSyncStatus, type HealthStatus } from '../../core/canvas-client.js';
 import { EXPRESS_SERVER_URL } from '../../core/config.js';
 import { readPidFile } from '../../core/pidfile.js';
 
@@ -30,15 +31,13 @@ export async function stop(argv: string[]): Promise<void> {
 export async function status(argv: string[]): Promise<void> {
   parseArgs(argv, {});
 
-  let health;
+  let health: HealthStatus;
   try {
     health = await getHealth();
   } catch {
     printJson({ running: false, url: EXPRESS_SERVER_URL });
-    const error = new Error(`Canvas server is not running at ${EXPRESS_SERVER_URL}`);
-    (error as any).code = 'CANVAS_UNREACHABLE';
-    (error as any).quiet = true; // JSON above already tells the story
-    throw error;
+    // quiet: the JSON above already tells the story
+    throw new CodedError(`Canvas server is not running at ${EXPRESS_SERVER_URL}`, 'CANVAS_UNREACHABLE', true);
   }
 
   if (!isCanvasHealth(health)) {
@@ -47,9 +46,7 @@ export async function status(argv: string[]): Promise<void> {
       url: EXPRESS_SERVER_URL,
       conflict: 'another service (or a pre-1.1 canvas build) is answering at this URL'
     });
-    const error = foreignServiceError();
-    (error as any).quiet = true;
-    throw error;
+    throw foreignServiceError(true);
   }
 
   let sync: Record<string, unknown> = {};

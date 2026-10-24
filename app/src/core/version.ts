@@ -1,5 +1,5 @@
-import fs from 'fs';
-import { fileURLToPath } from 'url';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 // Single source of truth for the package version (MCP server metadata,
 // CLI --version): read package.json so it can never drift from npm again.

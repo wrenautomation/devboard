@@ -1,6 +1,6 @@
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import { parseArgs, CliUsageError, readStdinBuffer } from '../args.js';
 import { printJson, note, requireBrowserClient } from '../util.js';
 import { ensureCanvasRunning } from '../../core/spawn.js';
@@ -28,7 +28,7 @@ export async function describe(argv: string[]): Promise<void> {
   await ensureCanvasRunning();
   const elements = await getElements();
   // Plain text by design: this is the human/agent-readable scene summary
-  process.stdout.write(describeScene(elements) + '\n');
+  process.stdout.write(`${describeScene(elements)}\n`);
 }
 
 export async function screenshot(argv: string[]): Promise<void> {
@@ -47,7 +47,7 @@ export async function screenshot(argv: string[]): Promise<void> {
 
   let outPath = flags.out as string | undefined;
   if (!outPath && format === 'svg') {
-    process.stdout.write(result.data + '\n');
+    process.stdout.write(`${result.data}\n`);
     return;
   }
   if (!outPath) {
@@ -97,7 +97,7 @@ export async function exportCmd(argv: string[]): Promise<void> {
     return;
   }
 
-  process.stdout.write(output + '\n');
+  process.stdout.write(`${output}\n`);
 }
 
 export async function importCmd(argv: string[]): Promise<void> {

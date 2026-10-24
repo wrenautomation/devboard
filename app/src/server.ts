@@ -1,12 +1,12 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express, { type Request, type Response, type NextFunction } from 'express';
 import cors from 'cors';
 import { WebSocketServer } from 'ws';
-import { createServer } from 'http';
-import net from 'net';
-import { execFileSync } from 'child_process';
-import path from 'path';
-import * as projectFs from 'fs';
-import { fileURLToPath } from 'url';
+import { createServer } from 'node:http';
+import net from 'node:net';
+import { execFileSync } from 'node:child_process';
+import path from 'node:path';
+import * as projectFs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import logger from './utils/logger.js';
 import {
@@ -15,22 +15,23 @@ import {
   snapshots,
   generateId,
   EXCALIDRAW_ELEMENT_TYPES,
-  ServerElement,
-  ExcalidrawElementType,
-  ExcalidrawFile,
-  WebSocketMessage,
-  ElementCreatedMessage,
-  ElementUpdatedMessage,
-  ElementDeletedMessage,
-  BatchCreatedMessage,
-  SyncStatusMessage,
-  InitialElementsMessage,
-  Snapshot,
+  type ServerElement,
+  type ExcalidrawElementType,
+  type ExcalidrawFile,
+  type WebSocketMessage,
+  type ElementCreatedMessage,
+  type ElementUpdatedMessage,
+  type ElementDeletedMessage,
+  type BatchCreatedMessage,
+  type SyncStatusMessage,
+  type InitialElementsMessage,
+  type Snapshot,
   normalizeFontFamily
 } from './types.js';
 import { z } from 'zod';
 import WebSocket from 'ws';
 import { isMainModule } from './core/entry.js';
+import { normalizePoints } from './core/normalize.js';
 import { writePidFile, removePidFile } from './core/pidfile.js';
 import { renderScene, RenderError, MAX_SCALE } from './core/render/index.js';
 import {
@@ -88,7 +89,7 @@ function broadcast(message: WebSocketMessage): void {
       if (client.readyState === WebSocket.OPEN) {
         client.send(data);
       }
-    } catch (err) {
+    } catch {
       logger.warn('Failed to send to client, removing');
       clients.delete(client);
     }
@@ -351,7 +352,7 @@ const isTab = (req: Request) => req.get('x-devboard-tab') === '1';
 // Every server-side write is an edit: a new versionNonce with each version, so Excalidraw's tie-break
 // (same version, lower nonce wins) stays fair between the server and the tabs.
 const freshNonce = () => Math.floor(Math.random() * 2 ** 31);
-const isScratchFrame = (e: ServerElement | undefined) => !!e && e.type === 'frame' && SCRATCH_NAME.test(String((e as any).name ?? ''));
+const isScratchFrame = (e: ServerElement | undefined) => !!e && e.type === 'frame' && SCRATCH_NAME.test(String(e.name ?? ''));
 function scratchHidden(): Set<string> {
   const all = Array.from(elements.values());
   const frames = all.filter(isScratchFrame);
@@ -366,7 +367,7 @@ function scratchHidden(): Set<string> {
   for (const e of all) {
     if (!frameIds.has(e.id) && ((e.frameId && frameIds.has(e.frameId)) || inside(e))) hidden.add(e.id);
   }
-  for (const e of all) if ((e as any).containerId && hidden.has((e as any).containerId)) hidden.add(e.id);
+  for (const e of all) if (e.containerId && hidden.has(e.containerId)) hidden.add(e.id);
   return hidden;
 }
 function visibleTo<T extends { id: string }>(req: Request, list: T[]): T[] {
@@ -475,6 +476,8 @@ app.put('/api/elements/:id', (req: Request, res: Response) => {
     const updatedElement: ServerElement = {
       ...existingElement,
       ...updates,
+      // Points come as [x, y] tuples or {x, y}; the canvas stores tuples.
+      points: updates.points ? normalizePoints(updates.points) : existingElement.points,
       fontFamily: updates.fontFamily !== undefined ? normalizeFontFamily(updates.fontFamily) : existingElement.fontFamily,
       updatedAt: new Date().toISOString(),
       version: (existingElement.version || 0) + 1,
@@ -483,8 +486,8 @@ app.put('/api/elements/:id', (req: Request, res: Response) => {
 
     // Keep Excalidraw text source in sync when clients update text via REST.
     // If originalText lags behind text, rendered wrapping/position can drift.
-    const hasTextUpdate = Object.prototype.hasOwnProperty.call(body, 'text');
-    const hasOriginalTextUpdate = Object.prototype.hasOwnProperty.call(body, 'originalText');
+    const hasTextUpdate = Object.hasOwn(body, 'text');
+    const hasOriginalTextUpdate = Object.hasOwn(body, 'originalText');
     if (updatedElement.type === EXCALIDRAW_ELEMENT_TYPES.TEXT && hasTextUpdate && !hasOriginalTextUpdate) {
       const incomingText = updates.text ?? '';
       const existingText = typeof existingElement.text === 'string' ? existingElement.text : '';
@@ -508,7 +511,7 @@ app.put('/api/elements/:id', (req: Request, res: Response) => {
     // Moving/resizing a shape must drag its bound arrows along. Keep the
     // element update and every in-place arrow reroute in one durable mutation.
     const geometryChanged = ['x', 'y', 'width', 'height']
-      .some(key => Object.prototype.hasOwnProperty.call(body, key));
+      .some(key => Object.hasOwn(body, key));
     const reroutedArrows = commitCanvasMutation(() => {
       elements.set(id, updatedElement);
       return geometryChanged && updatedElement.type !== 'arrow' && updatedElement.type !== 'line'
@@ -546,7 +549,7 @@ app.delete('/api/elements/clear', (req: Request, res: Response) => {
     const hidden = isTab(req) ? new Set<string>() : scratchHidden();
     const kept = isTab(req) ? [] : Array.from(elements.values()).filter(e => hidden.has(e.id) || isScratchFrame(e));
     const count = elements.size - kept.length;
-    commitCanvasMutation(() => { elements.clear(); kept.forEach(e => elements.set(e.id, e)); });
+    commitCanvasMutation(() => { elements.clear(); for (const e of kept) elements.set(e.id, e); });
 
     broadcast({
       type: 'canvas_cleared',
@@ -595,7 +598,7 @@ app.delete('/api/elements/:id', (req: Request, res: Response) => {
     // Broadcast to all connected clients
     const message: ElementDeletedMessage = {
       type: 'element_deleted',
-      elementId: id!
+      elementId: id
     };
     broadcast(message);
 
@@ -642,7 +645,7 @@ app.get('/api/elements/search', (req: Request, res: Response) => {
     if (Object.keys(filters).length > 0) {
       results = results.filter(element => {
         return Object.entries(filters).every(([key, value]) => {
-          return (element as any)[key] === value;
+          return element[key] === value;
         });
       });
     }
@@ -751,7 +754,7 @@ function computeEdgePoint(
 // Helper: resolve arrow bindings in a batch
 function resolveArrowBindings(batchElements: ServerElement[], includeExisting = true): void {
   const elementMap = new Map<string, ServerElement>();
-  batchElements.forEach(el => elementMap.set(el.id, el));
+  for (const el of batchElements) elementMap.set(el.id, el);
 
   // Also check existing elements for cross-batch references
   if (includeExisting) {
@@ -762,8 +765,8 @@ function resolveArrowBindings(batchElements: ServerElement[], includeExisting = 
 
   for (const el of batchElements) {
     if (el.type !== 'arrow' && el.type !== 'line') continue;
-    const startRef = (el as any).start as { id: string } | undefined;
-    const endRef = (el as any).end as { id: string } | undefined;
+    const startRef = el.start;
+    const endRef = el.end;
 
     if (!startRef && !endRef) continue;
 
@@ -822,13 +825,11 @@ function rerouteBoundArrows(movedId: string): ServerElement[] {
   const rerouted: ServerElement[] = [];
   elements.forEach(el => {
     if (el.type !== 'arrow' && el.type !== 'line') return;
-    const startRef = (el as any).start as { id: string } | undefined;
-    const endRef = (el as any).end as { id: string } | undefined;
-    if (startRef?.id !== movedId && endRef?.id !== movedId) return;
+    if (el.start?.id !== movedId && el.end?.id !== movedId) return;
     resolveArrowBindings([el]);
     el.updatedAt = new Date().toISOString();
     el.version = (el.version || 0) + 1;
-    (el as any).versionNonce = freshNonce();
+    el.versionNonce = freshNonce();
     rerouted.push(el);
   });
   return rerouted;
@@ -880,8 +881,8 @@ app.post('/api/elements/batch', (req: Request, res: Response) => {
     const kept = replace && !isTab(req) ? Array.from(elements.values()).filter(e => hidden.has(e.id) || isScratchFrame(e)) : [];
     const replacedCount = replace ? elements.size - kept.length : 0;
     commitCanvasMutation(() => {
-      if (replace) { elements.clear(); kept.forEach(e => elements.set(e.id, e)); }
-      createdElements.forEach(el => elements.set(el.id, el));
+      if (replace) { elements.clear(); for (const e of kept) elements.set(e.id, e); }
+      for (const el of createdElements) elements.set(el.id, el);
     });
 
     // Publish only after clear + replacement have reached one checkpoint.
@@ -991,8 +992,8 @@ app.post('/api/elements/sync', (req: Request, res: Response) => {
     const kept = isTab(req) ? [] : Array.from(elements.values()).filter(e => hidden.has(e.id) || isScratchFrame(e));
     commitCanvasMutation(() => {
       elements.clear();
-      kept.forEach(e => elements.set(e.id, e));
-      frontendElements.forEach((element: any, index: number) => {
+      for (const e of kept) elements.set(e.id, e);
+      frontendElements.forEach((element: ServerElement, index: number) => {
         try {
           // Ensure element has ID, generate one if missing
           const elementId = element.id || generateId();
@@ -1050,14 +1051,17 @@ app.post('/api/elements/sync', (req: Request, res: Response) => {
 // Merge push from a tab: only the shapes it changed, deletes included (isDeleted). Excalidraw's rule
 // picks the winner per shape: the higher version, then the lower versionNonce. The same push sent twice
 // is a no-op, so a tab can retry after a lost reply. The losers come back so the tab can take them.
+type PushedElement = ServerElement & { version: number };
+const isPushedElement = (e: unknown): e is PushedElement =>
+  !!e && typeof e === 'object' && typeof (e as PushedElement).id === 'string' && Number.isFinite((e as PushedElement).version);
 app.post('/api/elements/push', (req: Request, res: Response) => {
   try {
     const forProject = req.header('x-canvas-project');
     if (PROJECTS_DIR && CURRENT_FILE && forProject && forProject !== currentProject()) {
       return res.status(409).json({ success: false, error: 'project_changed', current: currentProject() });
     }
-    const incoming = req.body?.elements;
-    if (!Array.isArray(incoming) || incoming.some((e: any) => !e || typeof e.id !== 'string' || !Number.isFinite(e.version))) {
+    const incoming: unknown = req.body?.elements;
+    if (!Array.isArray(incoming) || !incoming.every(isPushedElement)) {
       return res.status(400).json({ success: false, error: 'Expected elements with id and version' });
     }
     const applied: { id: string; version: number; versionNonce: number }[] = [];
@@ -1065,12 +1069,13 @@ app.post('/api/elements/push', (req: Request, res: Response) => {
     const changed: ServerElement[] = [];
     commitCanvasMutation(() => {
       for (const el of incoming) {
-        const cur = elements.get(el.id) as any;
-        const nonce = (e: any) => e.versionNonce ?? 0;
-        const same = cur && cur.version === el.version && nonce(cur) === nonce(el);
-        const wins = !cur || el.version > cur.version || (el.version === cur.version && nonce(el) < nonce(cur));
+        const cur = elements.get(el.id);
+        const nonce = (e: { versionNonce?: number }) => e.versionNonce ?? 0;
+        const curVersion = cur?.version ?? 0; // every stored element carries one
+        const same = cur && curVersion === el.version && nonce(cur) === nonce(el);
+        const wins = !cur || el.version > curVersion || (el.version === curVersion && nonce(el) < nonce(cur));
         if (!same && !wins) { rejected.push(cur); continue; }
-        applied.push({ id: el.id, version: el.version, versionNonce: el.versionNonce });
+        applied.push({ id: el.id, version: el.version, versionNonce: nonce(el) });
         if (same) continue;
         if (el.isDeleted) {
           if (cur) { elements.delete(el.id); changed.push(el); }
@@ -1080,7 +1085,7 @@ app.post('/api/elements/push', (req: Request, res: Response) => {
         elements.set(el.id, next);
         changed.push(next);
         // A real label now exists: the container drops its skeleton label, or the next load makes it twice.
-        const box = el.type === 'text' && el.containerId ? elements.get(el.containerId) as any : undefined;
+        const box = el.type === 'text' && el.containerId ? elements.get(el.containerId) : undefined;
         if (box?.label) { const { label: _label, ...rest } = box; elements.set(box.id, rest); changed.push(rest); }
       }
     });
@@ -1112,7 +1117,7 @@ app.post('/api/files', (req: Request, res: Response) => {
     const preparedFiles = prepareFileWrites(fileList);
 
     commitCanvasMutation(() => {
-      preparedFiles.forEach(file => files.set(file.id, file));
+      for (const file of preparedFiles) files.set(file.id, file);
     });
     // Broadcast only after every referenced blob and the checkpoint are durable.
     broadcast({ type: 'files_added', files: fileList });
@@ -1512,7 +1517,7 @@ app.post('/api/snapshots', (req: Request, res: Response) => {
 });
 
 // Snapshots: list
-app.get('/api/snapshots', (req: Request, res: Response) => {
+app.get('/api/snapshots', (_req: Request, res: Response) => {
   try {
     const list = Array.from(snapshots.values()).map(s => ({
       name: s.name,
@@ -1537,8 +1542,8 @@ app.get('/api/snapshots', (req: Request, res: Response) => {
 // Snapshots: get by name
 app.get('/api/snapshots/:name', (req: Request, res: Response) => {
   try {
-    const { name } = req.params;
-    const snapshot = snapshots.get(name!);
+    const { name = '' } = req.params;
+    const snapshot = snapshots.get(name);
 
     if (!snapshot) {
       return res.status(404).json({
@@ -1561,7 +1566,7 @@ app.get('/api/snapshots/:name', (req: Request, res: Response) => {
 });
 
 // Serve the frontend
-app.get('/', (req: Request, res: Response) => {
+app.get('/', (_req: Request, res: Response) => {
   const htmlFile = path.join(__dirname, '../dist/frontend/index.html');
   res.sendFile(htmlFile, (err) => {
     if (err) {
@@ -1579,7 +1584,8 @@ type Note = { id: number; at: string; project: string; to: string; text: string;
 const NOTES_FILE = process.env.EXCALIDRAW_NOTES_FILE
   ?? (process.env.EXCALIDRAW_CURRENT_FILE ? path.join(path.dirname(process.env.EXCALIDRAW_CURRENT_FILE), 'notes.jsonl') : undefined);
 const notes: Note[] = (() => {
-  try { return projectFs.readFileSync(NOTES_FILE!, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)).slice(-200); } catch { return []; }
+  if (!NOTES_FILE) return [];
+  try { return projectFs.readFileSync(NOTES_FILE, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)).slice(-200); } catch { return []; }
 })();
 const watchers = new Map<Response, string>();
 const sendNote = (res: Response, n: Note) => res.write(`id: ${n.id}\ndata: ${JSON.stringify(n)}\n\n`);
@@ -1600,7 +1606,7 @@ app.post('/api/notify', (req: Request, res: Response) => {
   notes.push(note);
   if (notes.length > 200) notes.splice(0, notes.length - 200);
   if (NOTES_FILE) {
-    try { projectFs.writeFileSync(NOTES_FILE, notes.map(n => JSON.stringify(n)).join('\n') + '\n'); } catch (e) { logger.warn('Could not write notes file', e); }
+    try { projectFs.writeFileSync(NOTES_FILE, `${notes.map(n => JSON.stringify(n)).join('\n')}\n`); } catch (e) { logger.warn('Could not write notes file', e); }
   }
   let reached = 0;
   watchers.forEach((name, w) => { if (forWatcher(note, name)) { sendNote(w, note); reached++; } });
@@ -1613,7 +1619,7 @@ app.get('/api/events', (req: Request, res: Response) => {
   const since = Number(req.header('last-event-id') ?? req.query.since ?? NaN);
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
   res.write(': hello\n\n');
-  if (Number.isFinite(since)) notes.filter(n => n.id > since && forWatcher(n, name)).forEach(n => sendNote(res, n));
+  if (Number.isFinite(since)) for (const n of notes) if (n.id > since && forWatcher(n, name)) sendNote(res, n);
   watchers.set(res, name);
   const beat = setInterval(() => res.write(': beat\n\n'), 25000);
   req.on('close', () => { clearInterval(beat); watchers.delete(res); });
@@ -1634,7 +1640,7 @@ app.get('/api/terminals', (req: Request, res: Response) => {
   const pids = String(req.query.pids ?? '').split(',').map(Number).filter(n => Number.isInteger(n) && n > 1);
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
   res.write(': hello\n\n');
-  pids.forEach(p => terminals.set(p, res));
+  for (const p of pids) terminals.set(p, res);
   const beat = setInterval(() => res.write(': beat\n\n'), 25000);
   req.on('close', () => { clearInterval(beat); pids.forEach(p => { if (terminals.get(p) === res) terminals.delete(p); }); });
 });
@@ -1676,6 +1682,9 @@ app.get('/api/sessions', (_req: Request, res: Response) => {
 // and sends open tabs the new scene.
 const PROJECTS_DIR = process.env.EXCALIDRAW_PROJECTS_DIR;
 const CURRENT_FILE = process.env.EXCALIDRAW_CURRENT_FILE;
+// Every project route checks projectsOff first; these hold the same fact for the helpers below.
+const projectsRoot = (): string => { if (!PROJECTS_DIR) throw new Error('projects off'); return PROJECTS_DIR; };
+const currentFile = (): string => { if (!CURRENT_FILE) throw new Error('projects off'); return CURRENT_FILE; };
 const WATCHER_NAME = /^[a-z0-9][a-z0-9-]{0,40}$/; // `draw watch --name`, the canvas "To" picker
 const BOARD_PATH = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,47}(\/[A-Za-z0-9][A-Za-z0-9 _-]{0,47}){0,4}$/;
 const STATE_FILE = 'canvas-state-v1.json', THUMB_FILE = 'thumb.png';
@@ -1683,17 +1692,18 @@ const boardPath = (v: unknown): string | null => {
   const p = String(v ?? '').split('/').map(s => s.trim()).join('/');
   return BOARD_PATH.test(p) ? p : null;
 };
-const projectDir = (p: string) => path.join(PROJECTS_DIR!, ...p.split('/'));
+const projectDir = (p: string) => path.join(projectsRoot(), ...p.split('/'));
 const currentProject = (): string => {
-  try { return boardPath(projectFs.readFileSync(CURRENT_FILE!, 'utf8').trim()) ?? 'main'; } catch { return 'main'; }
+  if (!CURRENT_FILE) return 'main';
+  try { return boardPath(projectFs.readFileSync(CURRENT_FILE, 'utf8').trim()) ?? 'main'; } catch { return 'main'; }
 };
 const isBoard = (p: string) => p === currentProject() || projectFs.existsSync(path.join(projectDir(p), STATE_FILE));
-const within = (p: string, root: string) => p === root || p.startsWith(root + '/');
+const within = (p: string, root: string) => p === root || p.startsWith(`${root}/`);
 // Every board and folder under PROJECTS_DIR. Boards hold no folders.
 function walkProjects() {
   const boards: { path: string; updated: number; thumb: boolean }[] = [], folders: string[] = [];
   const walk = (rel: string, depth: number) => {
-    for (const d of projectFs.readdirSync(rel ? projectDir(rel) : PROJECTS_DIR!, { withFileTypes: true })) {
+    for (const d of projectFs.readdirSync(rel ? projectDir(rel) : projectsRoot(), { withFileTypes: true })) {
       const p = rel ? `${rel}/${d.name}` : d.name;
       if (!d.isDirectory() || !boardPath(p) || boardPath(p) !== p) continue;
       if (isBoard(p)) {
@@ -1708,7 +1718,11 @@ function walkProjects() {
   walk('', 0);
   return { boards: boards.sort((a, b) => a.path.localeCompare(b.path)), folders: folders.sort() };
 }
-const projectsOff = (res: Response) => (!PROJECTS_DIR || !CURRENT_FILE ? (res.status(404).json({ success: false, error: 'projects off' }), true) : false);
+const projectsOff = (res: Response): boolean => {
+  if (PROJECTS_DIR && CURRENT_FILE) return false;
+  res.status(404).json({ success: false, error: 'projects off' });
+  return true;
+};
 const sendScene = () => {
   const filesObj: Record<string, ExcalidrawFile> = {};
   files.forEach((f, id) => { filesObj[id] = f; });
@@ -1722,9 +1736,9 @@ const sendScene = () => {
 const openBoard = (name: string) => {
   projectFs.mkdirSync(projectDir(name), { recursive: true });
   switchDurableDirectory(projectDir(name));
-  projectFs.writeFileSync(CURRENT_FILE!, name + '\n');
+  projectFs.writeFileSync(currentFile(), `${name}\n`);
   logger.info(`Opened project "${name}" (${elements.size} elements)`);
-  broadcast({ type: 'project_opened', project: name } as any);
+  broadcast({ type: 'project_opened', project: name });
   sendScene();
 };
 // A board or folder may not sit inside a board.
@@ -1755,7 +1769,7 @@ app.post('/api/projects/folder', (req: Request, res: Response) => {
   if (projectFs.existsSync(projectDir(name))) return res.status(409).json({ success: false, error: `${name} already exists` });
   if (parentIsBoard(name)) return res.status(400).json({ success: false, error: 'a board cannot hold a folder' });
   projectFs.mkdirSync(projectDir(name), { recursive: true });
-  broadcast({ type: 'projects_changed' } as any);
+  broadcast({ type: 'projects_changed' });
   res.json({ success: true, path: name });
 });
 
@@ -1776,7 +1790,7 @@ const moveProject = (req: Request, res: Response) => {
     if (within(cur, from)) {
       const next = to + cur.slice(from.length);
       moveDurableDirectory(projectDir(from), projectDir(to), projectDir(next));
-      projectFs.writeFileSync(CURRENT_FILE!, next + '\n');
+      projectFs.writeFileSync(currentFile(), `${next}\n`);
     } else {
       projectFs.renameSync(projectDir(from), projectDir(to));
     }
@@ -1785,8 +1799,8 @@ const moveProject = (req: Request, res: Response) => {
     return res.status(500).json({ success: false, error: (error as Error).message });
   }
   logger.info(`Moved project "${from}" to "${to}"`);
-  if (currentProject() !== cur) broadcast({ type: 'project_renamed', from: cur, to: currentProject() } as any);
-  broadcast({ type: 'projects_changed' } as any);
+  if (currentProject() !== cur) broadcast({ type: 'project_renamed', from: cur, to: currentProject() });
+  broadcast({ type: 'projects_changed' });
   res.json({ success: true, current: currentProject() });
 };
 app.post('/api/projects/move', moveProject);
@@ -1802,7 +1816,7 @@ app.post('/api/projects/delete', (req: Request, res: Response) => {
       const next = walkProjects().boards.map(b => b.path).find(p => !within(p, name)) ?? (within('main', name) ? 'inbox' : 'main');
       openBoard(next);
     }
-    const trash = path.join(PROJECTS_DIR!, '..', 'trash');
+    const trash = path.join(projectsRoot(), '..', 'trash');
     projectFs.mkdirSync(trash, { recursive: true });
     projectFs.renameSync(projectDir(name), path.join(trash, `${name.replace(/\//g, '--')}-${new Date().toISOString().replace(/[:.]/g, '-')}`));
   } catch (error) {
@@ -1810,7 +1824,7 @@ app.post('/api/projects/delete', (req: Request, res: Response) => {
     return res.status(500).json({ success: false, error: (error as Error).message });
   }
   logger.info(`Deleted project "${name}" (moved to trash)`);
-  broadcast({ type: 'projects_changed' } as any);
+  broadcast({ type: 'projects_changed' });
   res.json({ success: true, current: currentProject() });
 });
 
@@ -1831,7 +1845,7 @@ app.get('/api/projects/thumb', (req: Request, res: Response) => {
   res.set('Cache-Control', 'no-cache').sendFile(path.resolve(file));
 });
 
-app.get('/health', (req: Request, res: Response) => {
+app.get('/health', (_req: Request, res: Response) => {
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
@@ -1850,7 +1864,7 @@ app.get('/health', (req: Request, res: Response) => {
 });
 
 // Sync status endpoint
-app.get('/api/sync/status', (req: Request, res: Response) => {
+app.get('/api/sync/status', (_req: Request, res: Response) => {
   res.json({
     success: true,
     elementCount: elements.size,
@@ -1865,7 +1879,7 @@ app.get('/api/sync/status', (req: Request, res: Response) => {
 });
 
 // Error handling middleware
-app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   logger.error('Unhandled error:', err);
   res.status(500).json({
     success: false,

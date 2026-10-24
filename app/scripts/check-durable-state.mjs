@@ -32,7 +32,6 @@ const fixtureRoot = mkdtempSync(join(tmpdir(), 'mcp excalidraw durable 状态-')
 const dataDirectory = join(fixtureRoot, 'canvas data');
 const statePath = join(dataDirectory, 'canvas-state-v1.json');
 const lockPath = join(dataDirectory, 'canvas-state.lock');
-const blobDirectory = join(dataDirectory, 'blobs');
 
 function serverUrl(port) {
   return `http://127.0.0.1:${port}`;

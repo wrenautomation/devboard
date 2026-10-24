@@ -1,4 +1,4 @@
-import { parseMermaidToExcalidraw, MermaidConfig } from '@excalidraw/mermaid-to-excalidraw';
+import { parseMermaidToExcalidraw, type MermaidConfig } from '@excalidraw/mermaid-to-excalidraw';
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types';
 import type { BinaryFiles } from '@excalidraw/excalidraw/types';
 

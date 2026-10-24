@@ -1,12 +1,14 @@
 // Local patch: Icons panel. Searchable, by category, over the canvas's pack (/lib/wren.excalidrawlib).
 // Tap an item to drop it at the middle of the view, or drag it sideways onto the canvas (no long press).
 // Excalidraw 0.18's own library has no search.
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import type React from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { exportToSvg, restoreElements } from '@excalidraw/excalidraw'
+import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
 import { placeOnCanvas, type Drop } from './place'
 
-type PackItem = { id: string; name: string; category: string; tags?: string; elements: any[] }
+type PackItem = { id: string; name: string; category: string; tags?: string; elements: readonly ExcalidrawElement[] }
 
 let packPromise: Promise<PackItem[]> | null = null
 const loadPack = () =>
@@ -94,8 +96,9 @@ function Tile({ item, onPick }: { item: PackItem; onPick: (i: PackItem, at?: Dro
   }
 
   return (
-    <button ref={ref} className="icon-tile" title={item.name} onPointerDown={down}
+    <button type="button" ref={ref} className="icon-tile" title={item.name} onPointerDown={down}
       onClick={() => { if (!dragged.current) onPick(item); dragged.current = false }}>
+      {/* biome-ignore lint/security/noDangerouslySetInnerHtml: the SVG comes from Excalidraw's own exporter over the local pack */}
       <span className="icon-art" dangerouslySetInnerHTML={{ __html: svg }} />
       <span className="icon-name">{item.name}</span>
     </button>
@@ -126,7 +129,7 @@ export function IconPanel({ api, onClose }: { api: ExcalidrawImperativeAPI | nul
     }).sort((a, b) => {
       if (!words.length) return 0
       const starts = (i: PackItem) => {
-        const n = i.name.toLowerCase(), w = words[0]!
+        const n = i.name.toLowerCase(), w = words[0]
         return n.startsWith(w) ? 0 : n.includes(w) ? 1 : (SYNONYMS[w] || []).some(x => n.includes(x)) ? 2 : 3
       }
       return starts(a) - starts(b)
@@ -155,12 +158,12 @@ export function IconPanel({ api, onClose }: { api: ExcalidrawImperativeAPI | nul
           autoCapitalize="off"
           autoCorrect="off"
         />
-        <button className="icon-close" onClick={onClose} aria-label="Close">✕</button>
+        <button type="button" className="icon-close" onClick={onClose} aria-label="Close">✕</button>
       </div>
       <div className="icon-cats">
-        <button className={!category ? 'on' : ''} onClick={() => setCategory('')}>All</button>
+        <button type="button" className={!category ? 'on' : ''} onClick={() => setCategory('')}>All</button>
         {categories.map(([c, n]) => (
-          <button key={c} className={category === c ? 'on' : ''} onClick={() => { setQuery(''); setCategory(category === c ? '' : c) }}>
+          <button type="button" key={c} className={category === c ? 'on' : ''} onClick={() => { setQuery(''); setCategory(category === c ? '' : c) }}>
             {c} <span>{n}</span>
           </button>
         ))}

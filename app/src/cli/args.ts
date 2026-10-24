@@ -24,7 +24,7 @@ export function parseArgs(argv: string[], spec: Record<string, FlagSpec>): Parse
   const flags: Record<string, string | boolean | string[]> = {};
 
   for (let i = 0; i < argv.length; i++) {
-    const token = argv[i]!;
+    const token = argv[i] ?? '';
 
     if (!token.startsWith('--')) {
       positionals.push(token);

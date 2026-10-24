@@ -1,10 +1,11 @@
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { parseArgs, CliUsageError, readStdinBuffer } from '../args.js';
 import { printJson, note } from '../util.js';
 import { IMAGE_FLAG_SPEC, imageFormatFromFlags, imageOptionsFromFlags } from '../image-options.js';
 import { decodeSceneInput } from '../../core/scene-input.js';
+import { sceneFromJson } from '../../core/scene-io.js';
 import { renderScene } from '../../core/render/index.js';
 
 // Render a scene file to PNG/SVG without a canvas server — for CI pipelines
@@ -24,14 +25,13 @@ export async function render(argv: string[]): Promise<void> {
     throw new CliUsageError('No scene provided (pass a .excalidraw / .excalidraw.md / embedded-scene PNG file or pipe a scene to stdin)');
   }
 
-  let sceneData: any;
+  let sceneData: ReturnType<typeof sceneFromJson>;
   try {
-    sceneData = JSON.parse(raw);
+    sceneData = sceneFromJson(JSON.parse(raw));
   } catch (error) {
     throw new CliUsageError(`Invalid scene JSON: ${(error as Error).message}`);
   }
-  const sourceElements = Array.isArray(sceneData) ? sceneData : sceneData?.elements;
-  if (!Array.isArray(sourceElements) || sourceElements.length === 0) {
+  if (sceneData.elements.length === 0) {
     throw new CliUsageError('No elements found in the scene');
   }
 
@@ -40,9 +40,9 @@ export async function render(argv: string[]): Promise<void> {
   const scene = {
     // Agent-format (label/start/end) and native elements are both accepted;
     // the renderer prepares them the way the canvas tab does.
-    elements: sourceElements,
-    files: (sceneData && !Array.isArray(sceneData) && sceneData.files) || {},
-    appState: !Array.isArray(sceneData) ? sceneData?.appState : undefined
+    elements: sceneData.elements,
+    files: sceneData.files || {},
+    appState: sceneData.appState
   };
 
   const result = await renderScene(scene, options);
@@ -50,7 +50,7 @@ export async function render(argv: string[]): Promise<void> {
 
   let outPath = flags.out as string | undefined;
   if (!outPath && format === 'svg') {
-    process.stdout.write(result.data + '\n');
+    process.stdout.write(`${result.data}\n`);
     return;
   }
   if (!outPath) {

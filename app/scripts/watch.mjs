@@ -25,7 +25,7 @@ const once = args.includes('--once')
 const pidFile = path.join(dir, `${name}.pid`)
 if (once) {
   const other = (() => { try { return Number(fs.readFileSync(pidFile, 'utf8')) } catch { return 0 } })()
-  const alive = (() => { try { return other > 0 && other !== process.pid && (process.kill(other, 0), true) } catch { return false } })()
+  const alive = (() => { try { if (!(other > 0 && other !== process.pid)) return false; process.kill(other, 0); return true } catch { return false } })()
   // A watcher whose shell died (ppid 1) still holds the stream but wakes no session: stop it and take over.
   const orphan = alive && (() => { try { return Number(execFileSync('ps', ['-o', 'ppid=', '-p', String(other)], { encoding: 'utf8' })) <= 1 } catch { return true } })()
   if (orphan) { try { process.kill(other) } catch {} }
@@ -60,8 +60,7 @@ for (let wait = 1000; ; wait = Math.min(wait * 2, 30000)) {
     let buf = ''
     for await (const chunk of res.body) {
       buf += Buffer.from(chunk).toString('utf8')
-      let end
-      while ((end = buf.indexOf('\n\n')) >= 0) {
+      for (let end = buf.indexOf('\n\n'); end >= 0; end = buf.indexOf('\n\n')) {
         const block = buf.slice(0, end); buf = buf.slice(end + 2)
         const data = block.split('\n').filter(l => l.startsWith('data: ')).map(l => l.slice(6)).join('\n')
         if (data) { try { show(JSON.parse(data)) } catch {} }

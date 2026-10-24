@@ -1,6 +1,6 @@
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { normalizeFontFamily } from '../../types.js';
 
 // Font registry for the headless renderer.
@@ -62,9 +62,11 @@ const REGISTRY: Record<number, FontEntry> = {
        metrics: { unitsPerEm: 2048, ascender: 1854, descender: -434, lineHeight: 1.15 } }
 };
 
+const DEFAULT_FONT: FontEntry = REGISTRY[DEFAULT_FONT_FAMILY] ?? Object.values(REGISTRY)[0] as FontEntry;
+
 export function getFontEntry(fontFamily: number | string | undefined): FontEntry {
   const id = normalizeFontFamily(fontFamily) ?? DEFAULT_FONT_FAMILY;
-  return REGISTRY[id] ?? REGISTRY[DEFAULT_FONT_FAMILY]!;
+  return REGISTRY[id] ?? DEFAULT_FONT;
 }
 
 // Families as they appear in `font-family` attributes of exporter output
@@ -79,7 +81,7 @@ export function collectFontEntriesFromSvg(svg: string): FontEntry[] {
     const entry = getFontEntryByFamilyName((match[1] ?? '').trim());
     if (entry) seen.set(entry.id, entry);
   }
-  if (seen.size === 0) seen.set(DEFAULT_FONT_FAMILY, REGISTRY[DEFAULT_FONT_FAMILY]!);
+  if (seen.size === 0) seen.set(DEFAULT_FONT_FAMILY, DEFAULT_FONT);
   return [...seen.values()];
 }
 
@@ -109,7 +111,7 @@ export function collectFontEntries(elements: ReadonlyArray<{ type?: string; font
     const entry = getFontEntry(el.fontFamily);
     seen.set(entry.id, entry);
   }
-  if (seen.size === 0) seen.set(DEFAULT_FONT_FAMILY, REGISTRY[DEFAULT_FONT_FAMILY]!);
+  if (seen.size === 0) seen.set(DEFAULT_FONT_FAMILY, DEFAULT_FONT);
   return [...seen.values()];
 }
 

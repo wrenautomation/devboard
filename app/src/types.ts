@@ -24,7 +24,7 @@ export interface ExcalidrawElementBase {
   isDeleted?: boolean;
   locked?: boolean;
   link?: string | null;
-  customData?: Record<string, any> | null;
+  customData?: Record<string, unknown> | null;
   boundElements?: readonly ExcalidrawBoundElement[] | null;
   updated?: number;
   containerId?: string | null;
@@ -101,12 +101,14 @@ export interface ExcalidrawBoundElement {
 
 export interface ExcalidrawBinding {
   elementId: string;
-  focus: number;
-  gap: number;
+  focus?: number;
+  gap?: number;
   fixedPoint?: readonly [number, number] | null;
+  mode?: string;
 }
 
-export type ExcalidrawElementType = 'rectangle' | 'ellipse' | 'diamond' | 'arrow' | 'text' | 'line' | 'freedraw' | 'image' | 'frame';
+// The kinds an agent may create (EXCALIDRAW_ELEMENT_TYPES) plus magicframe, which a tab can draw and sync.
+export type ExcalidrawElementType = 'rectangle' | 'ellipse' | 'diamond' | 'arrow' | 'text' | 'line' | 'freedraw' | 'image' | 'frame' | 'magicframe';
 
 // Excalidraw element types
 export const EXCALIDRAW_ELEMENT_TYPES: Record<string, ExcalidrawElementType> = {
@@ -121,10 +123,12 @@ export const EXCALIDRAW_ELEMENT_TYPES: Record<string, ExcalidrawElementType> = {
   FRAME: 'frame'
 } as const;
 
-// Server-side element with metadata
+// An element as it travels: JSON from a tab, an agent or a file, with the server's own metadata. The fields
+// the server reads are declared; every other Excalidraw field passes through the index signature untouched.
 export interface ServerElement extends Omit<ExcalidrawElementBase, 'id'> {
   id: string;
   type: ExcalidrawElementType;
+  index?: string | null;
   createdAt?: string;
   updatedAt?: string;
   version?: number;
@@ -138,14 +142,24 @@ export interface ServerElement extends Omit<ExcalidrawElementBase, 'id'> {
   label?: {
     text: string;
   };
-  points?: any;
+  points?: readonly (readonly [number, number])[];
   // Arrow element binding: connect arrows to shapes by element ID
   start?: { id: string };
   end?: { id: string };
+  startBinding?: ExcalidrawBinding | null;
+  endBinding?: ExcalidrawBinding | null;
+  elbowed?: boolean;
+  startArrowhead?: string | null;
+  endArrowhead?: string | null;
+  // Frames
+  name?: string | null;
+  // Images
+  fileId?: string;
+  [key: string]: unknown;
 }
 
 // API Response types
-export interface ApiResponse<T = any> {
+export interface ApiResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;
@@ -171,7 +185,7 @@ export interface SyncResponse extends ApiResponse {
 // WebSocket message types
 export interface WebSocketMessage {
   type: WebSocketMessageType;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export type WebSocketMessageType =
@@ -188,7 +202,10 @@ export type WebSocketMessageType =
   | 'export_image_request'
   | 'set_viewport'
   | 'files_added'
-  | 'file_deleted';
+  | 'file_deleted'
+  | 'project_opened'
+  | 'project_renamed'
+  | 'projects_changed';
 
 export interface InitialElementsMessage extends WebSocketMessage {
   type: 'initial_elements';
@@ -249,7 +266,7 @@ export interface MermaidConversionRequest {
 
 export interface MermaidConversionResponse extends ApiResponse {
   elements: ServerElement[];
-  files?: any;
+  files?: Record<string, ExcalidrawFile>;
   count: number;
 }
 

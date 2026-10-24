@@ -8,8 +8,8 @@ import {
   groupElements,
   ungroupElements,
   duplicateElements,
-  Alignment,
-  Direction
+  type Alignment,
+  type Direction
 } from '../../core/geometry.js';
 
 const ALIGNMENTS = new Set(['left', 'center', 'right', 'top', 'middle', 'bottom']);

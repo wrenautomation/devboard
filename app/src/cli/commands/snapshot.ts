@@ -28,7 +28,7 @@ export async function snapshot(argv: string[]): Promise<void> {
     }
     case 'restore': {
       if (!name) throw new CliUsageError('Usage: snapshot restore <name>');
-      let snap;
+      let snap: Awaited<ReturnType<typeof getSnapshot>>;
       try {
         snap = await getSnapshot(name);
       } catch {

@@ -1,4 +1,4 @@
-import { ServerElement } from '../types.js';
+import type { ServerElement } from '../types.js';
 
 // Build an AI-readable description of the current canvas: element types,
 // positions, connections, labels, spatial layout, and bounding box.
@@ -55,10 +55,9 @@ export function describeScene(allElements: ServerElement[]): string {
   const arrows = allElements.filter(el => el.type === 'arrow');
   const connectionDescs: string[] = [];
   for (const arrow of arrows) {
-    const arrowAny = arrow as any;
-    if (arrowAny.startBinding?.elementId || arrowAny.endBinding?.elementId) {
-      const from = arrowAny.startBinding?.elementId || '?';
-      const to = arrowAny.endBinding?.elementId || '?';
+    if (arrow.startBinding?.elementId || arrow.endBinding?.elementId) {
+      const from = arrow.startBinding?.elementId || '?';
+      const to = arrow.endBinding?.elementId || '?';
       connectionDescs.push(`  ${from} --> ${to} (arrow: ${arrow.id})`);
     }
   }
@@ -85,8 +84,9 @@ export function describeScene(allElements: ServerElement[]): string {
     const groupMap: Record<string, string[]> = {};
     for (const el of groupedElements) {
       for (const gid of (el.groupIds || [])) {
-        if (!groupMap[gid]) groupMap[gid] = [];
-        groupMap[gid]!.push(el.id);
+        const members = groupMap[gid] ?? [];
+        members.push(el.id);
+        groupMap[gid] = members;
       }
     }
     lines.push('');

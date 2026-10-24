@@ -1,6 +1,6 @@
-import fs from 'fs';
-import path from 'path';
-import { homedir } from 'os';
+import fs from 'node:fs';
+import path from 'node:path';
+import { homedir } from 'node:os';
 import logger from '../utils/logger.js';
 
 /**

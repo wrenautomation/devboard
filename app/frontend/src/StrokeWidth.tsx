@@ -2,7 +2,7 @@
 // style panel (the choice is remembered); it shows only when there is something to style: a selection, or a
 // tool that draws. The width row replaces Excalidraw's three fixed widths inside that panel: four presets
 // and a slider for any width. It sets the pen default and the selected shapes.
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { CaptureUpdateAction } from '@excalidraw/excalidraw'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
@@ -65,7 +65,7 @@ export function StrokeWidth({ api }: { api: ExcalidrawImperativeAPI | null }) {
       appState: { currentItemStrokeWidth: value },
       elements: api.getSceneElementsIncludingDeleted().map(e => picked[e.id] && !e.isDeleted
         ? { ...e, strokeWidth: value, version: e.version + 1, versionNonce: Math.floor(Math.random() * 2 ** 31), updated: Date.now() }
-        : e) as any,
+        : e),
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     })
   }
@@ -73,7 +73,7 @@ export function StrokeWidth({ api }: { api: ExcalidrawImperativeAPI | null }) {
   return (
     <>
       {shown && (
-        <button className="style-toggle" onClick={() => setHidden(h => !h)} aria-expanded={!hidden} aria-label="Style">
+        <button type="button" className="style-toggle" onClick={() => setHidden(h => !h)} aria-expanded={!hidden} aria-label="Style">
           <span className="st-swatch" style={{ background: color }} />
           <span className="st-line" style={{ height: Math.min(8, Math.max(1, width * 1.5)) }} />
           <span>Style</span>

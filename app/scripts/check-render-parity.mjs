@@ -93,8 +93,8 @@ try {
   if (a !== b) {
     let i = 0; while (i < a.length && a[i] === b[i]) i++;
     console.log(`first diff at ${i}/${a.length}`);
-    console.log('  tab : ...' + a.slice(Math.max(0, i - 80), i + 160));
-    console.log('  node: ...' + b.slice(Math.max(0, i - 80), i + 160));
+    console.log(`  tab : ...${a.slice(Math.max(0, i - 80), i + 160)}`);
+    console.log(`  node: ...${b.slice(Math.max(0, i - 80), i + 160)}`);
   }
   // Second comparison: render exactly the scene the tab holds (it syncs its
   // re-measured elements back to the server), isolating exporter parity from
@@ -109,8 +109,8 @@ try {
   if (a !== c) {
     let i = 0; while (i < a.length && a[i] === c[i]) i++;
     console.log(`first diff at ${i}/${a.length}`);
-    console.log('  tab : ...' + a.slice(Math.max(0, i - 80), i + 160));
-    console.log('  node: ...' + c.slice(Math.max(0, i - 80), i + 160));
+    console.log(`  tab : ...${a.slice(Math.max(0, i - 80), i + 160)}`);
+    console.log(`  node: ...${c.slice(Math.max(0, i - 80), i + 160)}`);
   }
   // Third comparison, the strict one: the same exporter code running in real
   // Chromium on the identical expanded elements (no editor in between).
@@ -131,8 +131,8 @@ try {
     if (d !== b) {
       let i = 0; while (i < d.length && d[i] === b[i]) i++;
       console.log(`first diff at ${i}/${d.length}`);
-      console.log('  browser: ...' + d.slice(Math.max(0, i - 80), i + 160));
-      console.log('  node   : ...' + b.slice(Math.max(0, i - 80), i + 160));
+      console.log(`  browser: ...${d.slice(Math.max(0, i - 80), i + 160)}`);
+      console.log(`  node   : ...${b.slice(Math.max(0, i - 80), i + 160)}`);
     }
     fs.writeFileSync('/tmp/spike-render/browser-exporter.svg', browserSvg);
   }

@@ -19,8 +19,7 @@ const argv = process.argv.slice(2);
 
 // Global --url flag: must land in the environment before any core module
 // (which reads EXPRESS_SERVER_URL at import time) is loaded.
-for (let i = 0; i < argv.length; i++) {
-  const token = argv[i]!;
+for (const [i, token] of argv.entries()) {
   if (token === '--url' && argv[i + 1]) {
     process.env.EXPRESS_SERVER_URL = argv[i + 1];
     argv.splice(i, 2);

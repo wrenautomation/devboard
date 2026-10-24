@@ -1,5 +1,6 @@
 // Local patch: drag a box over the canvas. Used by Mark area (Send to Claude) and Scratch.
-import React, { useState } from 'react'
+import type React from 'react'
+import { useState } from 'react'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
 
 export type Box = { x: number; y: number; w: number; h: number }
@@ -42,7 +43,7 @@ export function BoxDraw({ api, hint, onDone, onCancel }: {
   }
   return (
     <div className="nt-mark" onPointerDown={down}>
-      <div className="nt-mark-hint">{hint} <button onPointerDown={e => e.stopPropagation()} onClick={onCancel}>Cancel</button></div>
+      <div className="nt-mark-hint">{hint} <button type="button" onPointerDown={e => e.stopPropagation()} onClick={onCancel}>Cancel</button></div>
       {drag && <div className="nt-box" style={boxStyle(drag)} />}
     </div>
   )
