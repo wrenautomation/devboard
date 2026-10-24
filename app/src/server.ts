@@ -46,6 +46,11 @@ import {
 } from './types.js'
 import logger from './utils/logger.js'
 
+// Every refused request answers the same shape.
+function fail(res: Response, status: number, error: string): Response {
+  return res.status(status).json({ success: false, error })
+}
+
 function mutationErrorStatus(error: unknown, fallback: number): number {
   if (error instanceof CanvasPersistenceError) return 500
   if (error instanceof CanvasFileImmutabilityError || error instanceof CanvasFileReferenceError) return 409
@@ -76,6 +81,16 @@ app.use('/assets/fonts', express.static(path.join(__dirname, '../node_modules/@e
 
 // WebSocket connections
 const clients = new Set<WebSocket>()
+
+// The whole scene, for a tab that connects, reloads or switches board.
+function sceneMessage(): InitialElementsMessage {
+  return {
+    type: 'initial_elements',
+    elements: Array.from(elements.values()),
+    project: currentProject(),
+    ...(files.size > 0 ? { files: Object.fromEntries(files) } : {}),
+  }
+}
 
 // Broadcast to all connected clients
 function broadcast(message: WebSocketMessage): void {
@@ -184,17 +199,7 @@ wss.on('connection', (ws: WebSocket) => {
   logger.info('New WebSocket connection established')
 
   // Send current elements to new client
-  const filesObj: Record<string, ExcalidrawFile> = {}
-  files.forEach((f, id) => {
-    filesObj[id] = f
-  })
-  const initialMessage: InitialElementsMessage & { files?: Record<string, ExcalidrawFile> } = {
-    type: 'initial_elements',
-    elements: Array.from(elements.values()),
-    project: currentProject(),
-    ...(files.size > 0 ? { files: filesObj } : {}),
-  }
-  ws.send(JSON.stringify(initialMessage))
+  ws.send(JSON.stringify(sceneMessage()))
 
   // Send sync status to new client
   const syncMessage: SyncStatusMessage = {
@@ -215,168 +220,105 @@ wss.on('connection', (ws: WebSocket) => {
   })
 })
 
-// Schema validation
+// Schema validation. The fields an element may carry are one list; create requires type, x and y,
+// update requires an id and takes the rest as optional. Both pass unknown Excalidraw fields through.
+const elementFields = {
+  width: z.number().optional(),
+  height: z.number().optional(),
+  backgroundColor: z.string().optional(),
+  strokeColor: z.string().optional(),
+  strokeWidth: z.number().optional(),
+  strokeStyle: z.string().optional(),
+  roughness: z.number().optional(),
+  opacity: z.number().optional(),
+  text: z.string().optional(),
+  label: z
+    .object({
+      text: z.string(),
+    })
+    .optional(),
+  fontSize: z.number().optional(),
+  fontFamily: z.union([z.string(), z.number()]).optional(),
+  // Bound-text back-pointer — without it, zod strips containerId on import
+  // and re-imported bound labels detach from their containers
+  containerId: z.string().nullable().optional(),
+  // Excalidraw identity fields — preserve through import so re-exported
+  // scenes keep their stacking order, roughness seeds, and timestamps, and
+  // no-op import→export cycles stay byte-stable
+  index: z.string().nullable().optional(),
+  seed: z.number().optional(),
+  versionNonce: z.number().optional(),
+  updated: z.number().optional(),
+  groupIds: z.array(z.string()).optional(),
+  locked: z.boolean().optional(),
+  roundness: z.object({ type: z.number(), value: z.number().optional() }).nullable().optional(),
+  fillStyle: z.string().optional(),
+  // Arrow-specific properties (points: see the two schemas)
+  start: z.object({ id: z.string() }).optional(),
+  end: z.object({ id: z.string() }).optional(),
+  startArrowhead: z.string().nullable().optional(),
+  endArrowhead: z.string().nullable().optional(),
+  elbowed: z.boolean().optional(),
+  // Arrow binding properties (preserved for Excalidraw frontend)
+  startBinding: z
+    .object({
+      elementId: z.string(),
+      focus: z.number().optional(),
+      gap: z.number().optional(),
+      fixedPoint: z.tuple([z.number(), z.number()]).nullable().optional(),
+      mode: z.string().optional(),
+    })
+    .nullable()
+    .optional(),
+  endBinding: z
+    .object({
+      elementId: z.string(),
+      focus: z.number().optional(),
+      gap: z.number().optional(),
+      fixedPoint: z.tuple([z.number(), z.number()]).nullable().optional(),
+      mode: z.string().optional(),
+    })
+    .nullable()
+    .optional(),
+  boundElements: z
+    .array(
+      z.object({
+        id: z.string(),
+        type: z.enum(['arrow', 'text']),
+      }),
+    )
+    .nullable()
+    .optional(),
+  // Image-specific properties
+  fileId: z.string().optional(),
+  status: z.string().optional(),
+  scale: z.tuple([z.number(), z.number()]).optional(),
+}
+const elementType = z.enum(
+  Object.values(EXCALIDRAW_ELEMENT_TYPES) as [ExcalidrawElementType, ...ExcalidrawElementType[]],
+)
+const point = z.union([z.tuple([z.number(), z.number()]), z.object({ x: z.number(), y: z.number() })])
+
 const CreateElementSchema = z
   .object({
     id: z.string().optional(), // Allow passing ID for MCP sync
-    type: z.enum(Object.values(EXCALIDRAW_ELEMENT_TYPES) as [ExcalidrawElementType, ...ExcalidrawElementType[]]),
+    type: elementType,
     x: z.number(),
     y: z.number(),
-    width: z.number().optional(),
-    height: z.number().optional(),
-    backgroundColor: z.string().optional(),
-    strokeColor: z.string().optional(),
-    strokeWidth: z.number().optional(),
-    strokeStyle: z.string().optional(),
-    roughness: z.number().optional(),
-    opacity: z.number().optional(),
-    text: z.string().optional(),
-    label: z
-      .object({
-        text: z.string(),
-      })
-      .optional(),
-    fontSize: z.number().optional(),
-    fontFamily: z.union([z.string(), z.number()]).optional(),
-    // Bound-text back-pointer — without it, zod strips containerId on import
-    // and re-imported bound labels detach from their containers
-    containerId: z.string().nullable().optional(),
-    // Excalidraw identity fields — preserve through import so re-exported
-    // scenes keep their stacking order, roughness seeds, and timestamps, and
-    // no-op import→export cycles stay byte-stable
-    index: z.string().nullable().optional(),
-    seed: z.number().optional(),
-    versionNonce: z.number().optional(),
-    updated: z.number().optional(),
-    groupIds: z.array(z.string()).optional(),
-    locked: z.boolean().optional(),
-    roundness: z.object({ type: z.number(), value: z.number().optional() }).nullable().optional(),
-    fillStyle: z.string().optional(),
-    // Arrow-specific properties
     points: z.any().optional(),
-    start: z.object({ id: z.string() }).optional(),
-    end: z.object({ id: z.string() }).optional(),
-    startArrowhead: z.string().nullable().optional(),
-    endArrowhead: z.string().nullable().optional(),
-    elbowed: z.boolean().optional(),
-    // Arrow binding properties (preserved for Excalidraw frontend)
-    startBinding: z
-      .object({
-        elementId: z.string(),
-        focus: z.number().optional(),
-        gap: z.number().optional(),
-        fixedPoint: z.tuple([z.number(), z.number()]).nullable().optional(),
-        mode: z.string().optional(),
-      })
-      .nullable()
-      .optional(),
-    endBinding: z
-      .object({
-        elementId: z.string(),
-        focus: z.number().optional(),
-        gap: z.number().optional(),
-        fixedPoint: z.tuple([z.number(), z.number()]).nullable().optional(),
-        mode: z.string().optional(),
-      })
-      .nullable()
-      .optional(),
-    boundElements: z
-      .array(
-        z.object({
-          id: z.string(),
-          type: z.enum(['arrow', 'text']),
-        }),
-      )
-      .nullable()
-      .optional(),
-    // Image-specific properties
-    fileId: z.string().optional(),
-    status: z.string().optional(),
-    scale: z.tuple([z.number(), z.number()]).optional(),
+    ...elementFields,
   })
   .passthrough()
 
 const UpdateElementSchema = z
   .object({
     id: z.string(),
-    type: z
-      .enum(Object.values(EXCALIDRAW_ELEMENT_TYPES) as [ExcalidrawElementType, ...ExcalidrawElementType[]])
-      .optional(),
+    type: elementType.optional(),
     x: z.number().optional(),
     y: z.number().optional(),
-    width: z.number().optional(),
-    height: z.number().optional(),
-    backgroundColor: z.string().optional(),
-    strokeColor: z.string().optional(),
-    strokeWidth: z.number().optional(),
-    strokeStyle: z.string().optional(),
-    roughness: z.number().optional(),
-    opacity: z.number().optional(),
-    text: z.string().optional(),
     originalText: z.string().optional(),
-    label: z
-      .object({
-        text: z.string(),
-      })
-      .optional(),
-    fontSize: z.number().optional(),
-    fontFamily: z.union([z.string(), z.number()]).optional(),
-    // Bound-text back-pointer — without it, zod strips containerId on import
-    // and re-imported bound labels detach from their containers
-    containerId: z.string().nullable().optional(),
-    // Excalidraw identity fields — preserve through import so re-exported
-    // scenes keep their stacking order, roughness seeds, and timestamps, and
-    // no-op import→export cycles stay byte-stable
-    index: z.string().nullable().optional(),
-    seed: z.number().optional(),
-    versionNonce: z.number().optional(),
-    updated: z.number().optional(),
-    groupIds: z.array(z.string()).optional(),
-    locked: z.boolean().optional(),
-    roundness: z.object({ type: z.number(), value: z.number().optional() }).nullable().optional(),
-    fillStyle: z.string().optional(),
-    points: z
-      .array(z.union([z.tuple([z.number(), z.number()]), z.object({ x: z.number(), y: z.number() })]))
-      .optional(),
-    start: z.object({ id: z.string() }).optional(),
-    end: z.object({ id: z.string() }).optional(),
-    startArrowhead: z.string().nullable().optional(),
-    endArrowhead: z.string().nullable().optional(),
-    elbowed: z.boolean().optional(),
-    // Arrow binding properties (preserved for Excalidraw frontend)
-    startBinding: z
-      .object({
-        elementId: z.string(),
-        focus: z.number().optional(),
-        gap: z.number().optional(),
-        fixedPoint: z.tuple([z.number(), z.number()]).nullable().optional(),
-        mode: z.string().optional(),
-      })
-      .nullable()
-      .optional(),
-    endBinding: z
-      .object({
-        elementId: z.string(),
-        focus: z.number().optional(),
-        gap: z.number().optional(),
-        fixedPoint: z.tuple([z.number(), z.number()]).nullable().optional(),
-        mode: z.string().optional(),
-      })
-      .nullable()
-      .optional(),
-    boundElements: z
-      .array(
-        z.object({
-          id: z.string(),
-          type: z.enum(['arrow', 'text']),
-        }),
-      )
-      .nullable()
-      .optional(),
-    // Image-specific properties
-    fileId: z.string().optional(),
-    status: z.string().optional(),
-    scale: z.tuple([z.number(), z.number()]).optional(),
+    points: z.array(point).optional(),
+    ...elementFields,
   })
   .passthrough()
 
@@ -408,6 +350,12 @@ function scratchHidden(): Set<string> {
   for (const e of all) if (e.containerId && hidden.has(e.containerId)) hidden.add(e.id)
   return hidden
 }
+// What an agent's clear, replace or overwrite keeps: scratch frames and their contents. A tab keeps nothing.
+function scratchKept(req: Request): ServerElement[] {
+  if (isTab(req)) return []
+  const hidden = scratchHidden()
+  return Array.from(elements.values()).filter(e => hidden.has(e.id) || isScratchFrame(e))
+}
 function visibleTo<T extends { id: string }>(req: Request, list: T[]): T[] {
   if (isTab(req)) return list
   const hidden = scratchHidden()
@@ -417,11 +365,11 @@ function visibleTo<T extends { id: string }>(req: Request, list: T[]): T[] {
 function scratchBlock(req: Request, res: Response, id: string, write: boolean): boolean {
   if (isTab(req)) return false
   if (scratchHidden().has(id)) {
-    res.status(404).json({ success: false, error: `Element with ID ${id} not found` })
+    fail(res, 404, `Element with ID ${id} not found`)
     return true
   }
   if (write && isScratchFrame(elements.get(id))) {
-    res.status(403).json({ success: false, error: 'This is a scratch area. Only William changes it.' })
+    fail(res, 403, 'This is a scratch area. Only William changes it.')
     return true
   }
   return false
@@ -442,10 +390,7 @@ app.get('/api/elements', (req: Request, res: Response) => {
     })
   } catch (error) {
     logger.error('Error fetching elements:', error)
-    res.status(500).json({
-      success: false,
-      error: (error as Error).message,
-    })
+    fail(res, 500, (error as Error).message)
   }
 })
 
@@ -487,10 +432,7 @@ app.post('/api/elements', (req: Request, res: Response) => {
     })
   } catch (error) {
     logger.error('Error creating element:', error)
-    res.status(mutationErrorStatus(error, 400)).json({
-      success: false,
-      error: (error as Error).message,
-    })
+    fail(res, mutationErrorStatus(error, 400), (error as Error).message)
   }
 })
 
@@ -503,18 +445,12 @@ app.put('/api/elements/:id', (req: Request, res: Response) => {
     if (id && scratchBlock(req, res, id, true)) return
 
     if (!id) {
-      return res.status(400).json({
-        success: false,
-        error: 'Element ID is required',
-      })
+      return fail(res, 400, 'Element ID is required')
     }
 
     const existingElement = elements.get(id)
     if (!existingElement) {
-      return res.status(404).json({
-        success: false,
-        error: `Element with ID ${id} not found`,
-      })
+      return fail(res, 404, `Element with ID ${id} not found`)
     }
 
     const updatedElement: ServerElement = {
@@ -577,19 +513,14 @@ app.put('/api/elements/:id', (req: Request, res: Response) => {
     })
   } catch (error) {
     logger.error('Error updating element:', error)
-    res.status(mutationErrorStatus(error, 400)).json({
-      success: false,
-      error: (error as Error).message,
-    })
+    fail(res, mutationErrorStatus(error, 400), (error as Error).message)
   }
 })
 
 // Clear all elements (must be before /:id route)
 app.delete('/api/elements/clear', (req: Request, res: Response) => {
   try {
-    // An agent's clear keeps scratch frames and their contents.
-    const hidden = isTab(req) ? new Set<string>() : scratchHidden()
-    const kept = isTab(req) ? [] : Array.from(elements.values()).filter(e => hidden.has(e.id) || isScratchFrame(e))
+    const kept = scratchKept(req)
     const count = elements.size - kept.length
     commitCanvasMutation(() => {
       elements.clear()
@@ -611,10 +542,7 @@ app.delete('/api/elements/clear', (req: Request, res: Response) => {
     })
   } catch (error) {
     logger.error('Error clearing canvas:', error)
-    res.status(mutationErrorStatus(error, 500)).json({
-      success: false,
-      error: (error as Error).message,
-    })
+    fail(res, mutationErrorStatus(error, 500), (error as Error).message)
   }
 })
 
@@ -624,17 +552,11 @@ app.delete('/api/elements/:id', (req: Request, res: Response) => {
     const { id } = req.params
 
     if (!id) {
-      return res.status(400).json({
-        success: false,
-        error: 'Element ID is required',
-      })
+      return fail(res, 400, 'Element ID is required')
     }
 
     if (!elements.has(id)) {
-      return res.status(404).json({
-        success: false,
-        error: `Element with ID ${id} not found`,
-      })
+      return fail(res, 404, `Element with ID ${id} not found`)
     }
     if (scratchBlock(req, res, id, true)) return
 
@@ -653,10 +575,7 @@ app.delete('/api/elements/:id', (req: Request, res: Response) => {
     })
   } catch (error) {
     logger.error('Error deleting element:', error)
-    res.status(mutationErrorStatus(error, 500)).json({
-      success: false,
-      error: (error as Error).message,
-    })
+    fail(res, mutationErrorStatus(error, 500), (error as Error).message)
   }
 })
 
@@ -697,10 +616,7 @@ app.get('/api/elements/search', (req: Request, res: Response) => {
     })
   } catch (error) {
     logger.error('Error querying elements:', error)
-    res.status(500).json({
-      success: false,
-      error: (error as Error).message,
-    })
+    fail(res, 500, (error as Error).message)
   }
 })
 
@@ -710,19 +626,13 @@ app.get('/api/elements/:id', (req: Request, res: Response) => {
     const { id } = req.params
 
     if (!id) {
-      return res.status(400).json({
-        success: false,
-        error: 'Element ID is required',
-      })
+      return fail(res, 400, 'Element ID is required')
     }
 
     const element = elements.get(id)
 
     if (!element) {
-      return res.status(404).json({
-        success: false,
-        error: `Element with ID ${id} not found`,
-      })
+      return fail(res, 404, `Element with ID ${id} not found`)
     }
     if (scratchBlock(req, res, id, false)) return
 
@@ -732,10 +642,7 @@ app.get('/api/elements/:id', (req: Request, res: Response) => {
     })
   } catch (error) {
     logger.error('Error fetching element:', error)
-    res.status(500).json({
-      success: false,
-      error: (error as Error).message,
-    })
+    fail(res, 500, (error as Error).message)
   }
 })
 
@@ -874,16 +781,10 @@ app.post('/api/elements/batch', (req: Request, res: Response) => {
     const { elements: elementsToCreate, replace = false } = req.body ?? {}
 
     if (!Array.isArray(elementsToCreate)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Expected an array of elements',
-      })
+      return fail(res, 400, 'Expected an array of elements')
     }
     if (typeof replace !== 'boolean') {
-      return res.status(400).json({
-        success: false,
-        error: 'replace must be a boolean',
-      })
+      return fail(res, 400, 'replace must be a boolean')
     }
 
     const createdElements: ServerElement[] = []
@@ -909,10 +810,7 @@ app.post('/api/elements/batch', (req: Request, res: Response) => {
     // not resolve bindings against elements that are about to be discarded.
     resolveArrowBindings(createdElements, !replace)
 
-    // An agent's replace keeps scratch frames and their contents.
-    const hidden = replace && !isTab(req) ? scratchHidden() : new Set<string>()
-    const kept =
-      replace && !isTab(req) ? Array.from(elements.values()).filter(e => hidden.has(e.id) || isScratchFrame(e)) : []
+    const kept = replace ? scratchKept(req) : []
     const replacedCount = replace ? elements.size - kept.length : 0
     commitCanvasMutation(() => {
       if (replace) {
@@ -945,10 +843,7 @@ app.post('/api/elements/batch', (req: Request, res: Response) => {
     })
   } catch (error) {
     logger.error('Error batch creating elements:', error)
-    res.status(mutationErrorStatus(error, 400)).json({
-      success: false,
-      error: (error as Error).message,
-    })
+    fail(res, mutationErrorStatus(error, 400), (error as Error).message)
   }
 })
 
@@ -958,10 +853,7 @@ app.post('/api/elements/from-mermaid', (req: Request, res: Response) => {
     const { mermaidDiagram, config } = req.body
 
     if (!mermaidDiagram || typeof mermaidDiagram !== 'string') {
-      return res.status(400).json({
-        success: false,
-        error: 'Mermaid diagram definition is required',
-      })
+      return fail(res, 400, 'Mermaid diagram definition is required')
     }
 
     logger.info('Received Mermaid conversion request', {
@@ -986,10 +878,7 @@ app.post('/api/elements/from-mermaid', (req: Request, res: Response) => {
     })
   } catch (error) {
     logger.error('Error processing Mermaid diagram:', error)
-    res.status(400).json({
-      success: false,
-      error: (error as Error).message,
-    })
+    fail(res, 400, (error as Error).message)
   }
 })
 
@@ -1008,10 +897,7 @@ app.post('/api/elements/sync', (req: Request, res: Response) => {
 
     // Validate input data
     if (!Array.isArray(frontendElements)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Expected elements to be an array',
-      })
+      return fail(res, 400, 'Expected elements to be an array')
     }
 
     logger.info(`Sync request received: ${frontendElements.length} elements`, {
@@ -1024,9 +910,7 @@ app.post('/api/elements/sync', (req: Request, res: Response) => {
     let successCount = 0
     const processedElements: ServerElement[] = []
 
-    // A sync that is not from the canvas tab keeps scratch frames and their contents.
-    const hidden = isTab(req) ? new Set<string>() : scratchHidden()
-    const kept = isTab(req) ? [] : Array.from(elements.values()).filter(e => hidden.has(e.id) || isScratchFrame(e))
+    const kept = scratchKept(req)
     commitCanvasMutation(() => {
       elements.clear()
       for (const e of kept) elements.set(e.id, e)
@@ -1101,7 +985,7 @@ app.post('/api/elements/push', (req: Request, res: Response) => {
     }
     const incoming: unknown = req.body?.elements
     if (!Array.isArray(incoming) || !incoming.every(isPushedElement)) {
-      return res.status(400).json({ success: false, error: 'Expected elements with id and version' })
+      return fail(res, 400, 'Expected elements with id and version')
     }
     const applied: { id: string; version: number; versionNonce: number }[] = []
     const rejected: ServerElement[] = []
@@ -1143,18 +1027,14 @@ app.post('/api/elements/push', (req: Request, res: Response) => {
     res.json({ success: true, applied, rejected })
   } catch (error) {
     logger.error('Push error:', error)
-    res.status(mutationErrorStatus(error, 500)).json({ success: false, error: (error as Error).message })
+    fail(res, mutationErrorStatus(error, 500), (error as Error).message)
   }
 })
 
 // ─── Files API (for image elements) ───────────────────────────
 // GET all files
 app.get('/api/files', (_req: Request, res: Response) => {
-  const filesObj: Record<string, ExcalidrawFile> = {}
-  files.forEach((f, id) => {
-    filesObj[id] = f
-  })
-  res.json({ files: filesObj })
+  res.json({ files: Object.fromEntries(files) })
 })
 
 // POST add/update files (batch)
@@ -1176,10 +1056,7 @@ app.post('/api/files', (req: Request, res: Response) => {
   } catch (error) {
     logger.error('Error storing canvas files:', error)
     if (!durableStatePath()) throw error
-    res.status(mutationErrorStatus(error, 400)).json({
-      success: false,
-      error: (error as Error).message,
-    })
+    fail(res, mutationErrorStatus(error, 400), (error as Error).message)
   }
 })
 
@@ -1188,17 +1065,14 @@ app.delete('/api/files/:id', (req: Request, res: Response) => {
   try {
     const id = req.params.id as string
     if (!files.has(id)) {
-      return res.status(404).json({ success: false, error: `File with ID ${id} not found` })
+      return fail(res, 404, `File with ID ${id} not found`)
     }
     commitCanvasMutation(() => files.delete(id))
     broadcast({ type: 'file_deleted', fileId: id })
     res.json({ success: true })
   } catch (error) {
     logger.error('Error deleting canvas file:', error)
-    res.status(mutationErrorStatus(error, 500)).json({
-      success: false,
-      error: (error as Error).message,
-    })
+    fail(res, mutationErrorStatus(error, 500), (error as Error).message)
   }
 })
 
@@ -1253,16 +1127,7 @@ function exportViaBrowserTab(options: ExportImageBody): Promise<{ format: string
 
   // Re-broadcast current elements so all connected clients (including stale ones)
   // sync to the canonical server state before exporting
-  const filesObj: Record<string, ExcalidrawFile> = {}
-  files.forEach((f, id) => {
-    filesObj[id] = f
-  })
-  broadcast({
-    type: 'initial_elements',
-    elements: Array.from(elements.values()),
-    project: currentProject(),
-    ...(files.size > 0 ? { files: filesObj } : {}),
-  } as InitialElementsMessage & { files?: Record<string, ExcalidrawFile> })
+  broadcast(sceneMessage())
 
   // Give browsers time to process the reload before requesting export
   setTimeout(() => {
@@ -1283,29 +1148,29 @@ app.post('/api/export/image', async (req: Request, res: Response) => {
   if (!parsed.success) {
     const issue = parsed.error.issues[0]
     const where = issue?.path.join('.')
-    return res.status(400).json({
-      success: false,
-      error:
-        where === 'format'
-          ? 'format must be "png" or "svg"'
-          : `${where ? `${where}: ` : ''}${issue?.message ?? 'invalid request'}`,
-    })
+    return fail(
+      res,
+      400,
+      where === 'format'
+        ? 'format must be "png" or "svg"'
+        : `${where ? `${where}: ` : ''}${issue?.message ?? 'invalid request'}`,
+    )
   }
   const options = parsed.data
   if (options.embedScene && options.format !== 'png') {
-    return res.status(400).json({ success: false, error: 'embedScene is only supported for PNG exports' })
+    return fail(res, 400, 'embedScene is only supported for PNG exports')
   }
   const renderer = options.renderer ?? 'auto'
 
   const respondBrowser = async () => {
     if (clients.size === 0) {
-      return res.status(503).json({ success: false, error: NO_BROWSER_TAB_ERROR })
+      return fail(res, 503, NO_BROWSER_TAB_ERROR)
     }
     try {
       const result = await exportViaBrowserTab({ ...options, hide: [...scratchHidden()] } as ExportImageBody)
       res.json({ success: true, format: result.format, data: result.data, renderer: 'browser' })
     } catch (error) {
-      res.status(500).json({ success: false, error: (error as Error).message })
+      fail(res, 500, (error as Error).message)
     }
   }
 
@@ -1326,7 +1191,7 @@ app.post('/api/export/image', async (req: Request, res: Response) => {
     })
   } catch (error) {
     if (error instanceof RenderError) {
-      return res.status(error.status).json({ success: false, error: error.message })
+      return fail(res, error.status, error.message)
     }
     logger.error('Headless image export failed:', error)
     if (renderer === 'auto' && clients.size > 0) {
@@ -1334,7 +1199,7 @@ app.post('/api/export/image', async (req: Request, res: Response) => {
       logger.warn('Falling back to the browser tab for this export')
       return respondBrowser()
     }
-    res.status(500).json({ success: false, error: (error as Error).message })
+    fail(res, 500, (error as Error).message)
   }
 })
 
@@ -1344,10 +1209,7 @@ app.post('/api/export/image/result', (req: Request, res: Response) => {
     const { requestId, format, data, error } = req.body
 
     if (!requestId) {
-      return res.status(400).json({
-        success: false,
-        error: 'requestId is required',
-      })
+      return fail(res, 400, 'requestId is required')
     }
 
     const pending = pendingExports.get(requestId)
@@ -1382,10 +1244,7 @@ app.post('/api/export/image/result', (req: Request, res: Response) => {
     res.json({ success: true })
   } catch (error) {
     logger.error('Error processing export result:', error)
-    res.status(500).json({
-      success: false,
-      error: (error as Error).message,
-    })
+    fail(res, 500, (error as Error).message)
   }
 })
 
@@ -1441,10 +1300,7 @@ app.post('/api/viewport', (req: Request, res: Response) => {
       viewportRequestSchema.parse(req.body)
 
     if (clients.size === 0) {
-      return res.status(503).json({
-        success: false,
-        error: 'No frontend client connected. Open the canvas in a browser first.',
-      })
+      return fail(res, 503, 'No frontend client connected. Open the canvas in a browser first.')
     }
 
     const requestId = generateId()
@@ -1475,18 +1331,15 @@ app.post('/api/viewport', (req: Request, res: Response) => {
         res.json(result)
       })
       .catch(error => {
-        res.status(500).json({
-          success: false,
-          error: (error as Error).message,
-        })
+        fail(res, 500, (error as Error).message)
       })
   } catch (error) {
     logger.error('Error initiating viewport change:', error)
-    res.status(error instanceof z.ZodError ? 400 : 500).json({
-      success: false,
-      error:
-        error instanceof z.ZodError ? error.issues.map(issue => issue.message).join('; ') : (error as Error).message,
-    })
+    fail(
+      res,
+      error instanceof z.ZodError ? 400 : 500,
+      error instanceof z.ZodError ? error.issues.map(issue => issue.message).join('; ') : (error as Error).message,
+    )
   }
 })
 
@@ -1496,10 +1349,7 @@ app.post('/api/viewport/result', (req: Request, res: Response) => {
     const { requestId, success, message, error } = req.body
 
     if (!requestId) {
-      return res.status(400).json({
-        success: false,
-        error: 'requestId is required',
-      })
+      return fail(res, 400, 'requestId is required')
     }
 
     const pending = pendingViewports.get(requestId)
@@ -1521,10 +1371,7 @@ app.post('/api/viewport/result', (req: Request, res: Response) => {
     res.json({ success: true })
   } catch (error) {
     logger.error('Error processing viewport result:', error)
-    res.status(500).json({
-      success: false,
-      error: (error as Error).message,
-    })
+    fail(res, 500, (error as Error).message)
   }
 })
 
@@ -1534,10 +1381,7 @@ app.post('/api/snapshots', (req: Request, res: Response) => {
     const { name } = req.body
 
     if (!name || typeof name !== 'string') {
-      return res.status(400).json({
-        success: false,
-        error: 'Snapshot name is required',
-      })
+      return fail(res, 400, 'Snapshot name is required')
     }
 
     const snapshot: Snapshot = {
@@ -1560,10 +1404,7 @@ app.post('/api/snapshots', (req: Request, res: Response) => {
     })
   } catch (error) {
     logger.error('Error saving snapshot:', error)
-    res.status(mutationErrorStatus(error, 500)).json({
-      success: false,
-      error: (error as Error).message,
-    })
+    fail(res, mutationErrorStatus(error, 500), (error as Error).message)
   }
 })
 
@@ -1583,10 +1424,7 @@ app.get('/api/snapshots', (_req: Request, res: Response) => {
     })
   } catch (error) {
     logger.error('Error listing snapshots:', error)
-    res.status(500).json({
-      success: false,
-      error: (error as Error).message,
-    })
+    fail(res, 500, (error as Error).message)
   }
 })
 
@@ -1597,10 +1435,7 @@ app.get('/api/snapshots/:name', (req: Request, res: Response) => {
     const snapshot = snapshots.get(name)
 
     if (!snapshot) {
-      return res.status(404).json({
-        success: false,
-        error: `Snapshot "${name}" not found`,
-      })
+      return fail(res, 404, `Snapshot "${name}" not found`)
     }
 
     res.json({
@@ -1609,10 +1444,7 @@ app.get('/api/snapshots/:name', (req: Request, res: Response) => {
     })
   } catch (error) {
     logger.error('Error fetching snapshot:', error)
-    res.status(500).json({
-      success: false,
-      error: (error as Error).message,
-    })
+    fail(res, 500, (error as Error).message)
   }
 })
 
@@ -1681,8 +1513,7 @@ app.post('/api/notify', (req: Request, res: Response) => {
       : undefined
   // area: the box is a marked area, not the bounds of the selected shapes.
   const area = req.body?.area === true && box && box.w > 0 && box.h > 0
-  if (!text && !ids.length && !area)
-    return res.status(400).json({ success: false, error: 'note needs text, selected shapes or a marked area' })
+  if (!text && !ids.length && !area) return fail(res, 400, 'note needs text, selected shapes or a marked area')
   const to = WATCHER_NAME.test(String(req.body?.to ?? '')) ? String(req.body.to) : ''
   // enter: also press Enter in the terminal of that one session, so a message typed there goes in too.
   const shell = req.body?.enter === true && to ? liveSessions().find(x => x.watch === to)?.shell : undefined
@@ -1891,20 +1722,8 @@ function walkProjects() {
 }
 const projectsOff = (res: Response): boolean => {
   if (PROJECTS_DIR && CURRENT_FILE) return false
-  res.status(404).json({ success: false, error: 'projects off' })
+  fail(res, 404, 'projects off')
   return true
-}
-const sendScene = () => {
-  const filesObj: Record<string, ExcalidrawFile> = {}
-  files.forEach((f, id) => {
-    filesObj[id] = f
-  })
-  broadcast({
-    type: 'initial_elements',
-    elements: Array.from(elements.values()),
-    project: currentProject(),
-    ...(files.size > 0 ? { files: filesObj } : {}),
-  } as InitialElementsMessage & { files?: Record<string, ExcalidrawFile> })
 }
 const openBoard = (name: string) => {
   projectFs.mkdirSync(projectDir(name), { recursive: true })
@@ -1912,7 +1731,7 @@ const openBoard = (name: string) => {
   projectFs.writeFileSync(currentFile(), `${name}\n`)
   logger.info(`Opened project "${name}" (${elements.size} elements)`)
   broadcast({ type: 'project_opened', project: name })
-  sendScene()
+  broadcast(sceneMessage())
 }
 // A board or folder may not sit inside a board.
 const parentIsBoard = (p: string) =>
@@ -1929,27 +1748,24 @@ app.get('/api/projects', (_req: Request, res: Response) => {
 app.post('/api/projects/open', (req: Request, res: Response) => {
   if (projectsOff(res)) return
   const name = boardPath(req.body?.name)
-  if (!name)
-    return res.status(400).json({ success: false, error: 'name: letters, digits, spaces, dashes; folders with /' })
+  if (!name) return fail(res, 400, 'name: letters, digits, spaces, dashes; folders with /')
   if (name === currentProject()) return res.json({ success: true, current: name })
-  if (parentIsBoard(name)) return res.status(400).json({ success: false, error: 'a board cannot hold another board' })
-  if (projectFs.existsSync(projectDir(name)) && !isBoard(name))
-    return res.status(409).json({ success: false, error: `${name} is a folder` })
+  if (parentIsBoard(name)) return fail(res, 400, 'a board cannot hold another board')
+  if (projectFs.existsSync(projectDir(name)) && !isBoard(name)) return fail(res, 409, `${name} is a folder`)
   try {
     openBoard(name)
   } catch (error) {
     logger.error(`Could not open project "${name}"`, error)
-    return res.status(500).json({ success: false, error: (error as Error).message })
+    return fail(res, 500, (error as Error).message)
   }
   res.json({ success: true, current: name })
 })
 app.post('/api/projects/folder', (req: Request, res: Response) => {
   if (projectsOff(res)) return
   const name = boardPath(req.body?.path)
-  if (!name) return res.status(400).json({ success: false, error: 'name: letters, digits, spaces, dashes' })
-  if (projectFs.existsSync(projectDir(name)))
-    return res.status(409).json({ success: false, error: `${name} already exists` })
-  if (parentIsBoard(name)) return res.status(400).json({ success: false, error: 'a board cannot hold a folder' })
+  if (!name) return fail(res, 400, 'name: letters, digits, spaces, dashes')
+  if (projectFs.existsSync(projectDir(name))) return fail(res, 409, `${name} already exists`)
+  if (parentIsBoard(name)) return fail(res, 400, 'a board cannot hold a folder')
   projectFs.mkdirSync(projectDir(name), { recursive: true })
   broadcast({ type: 'projects_changed' })
   res.json({ success: true, path: name })
@@ -1960,15 +1776,14 @@ const moveProject = (req: Request, res: Response) => {
   if (projectsOff(res)) return
   const from = boardPath(req.body?.from),
     to = boardPath(req.body?.to)
-  if (!from || !to) return res.status(400).json({ success: false, error: 'name: letters, digits, spaces, dashes' })
+  if (!from || !to) return fail(res, 400, 'name: letters, digits, spaces, dashes')
   if (from === to) return res.json({ success: true, current: currentProject() })
-  if (!projectFs.existsSync(projectDir(from)))
-    return res.status(404).json({ success: false, error: `no project ${from}` })
-  if (within(to, from)) return res.status(400).json({ success: false, error: 'cannot move a folder into itself' })
+  if (!projectFs.existsSync(projectDir(from))) return fail(res, 404, `no project ${from}`)
+  if (within(to, from)) return fail(res, 400, 'cannot move a folder into itself')
   // A case-only rename finds itself on macOS.
   if (projectFs.existsSync(projectDir(to)) && from.toLowerCase() !== to.toLowerCase())
-    return res.status(409).json({ success: false, error: `${to} already exists` })
-  if (parentIsBoard(to)) return res.status(400).json({ success: false, error: 'a board cannot hold another board' })
+    return fail(res, 409, `${to} already exists`)
+  if (parentIsBoard(to)) return fail(res, 400, 'a board cannot hold another board')
   const cur = currentProject()
   try {
     projectFs.mkdirSync(path.dirname(projectDir(to)), { recursive: true })
@@ -1981,7 +1796,7 @@ const moveProject = (req: Request, res: Response) => {
     }
   } catch (error) {
     logger.error(`Could not move project "${from}"`, error)
-    return res.status(500).json({ success: false, error: (error as Error).message })
+    return fail(res, 500, (error as Error).message)
   }
   logger.info(`Moved project "${from}" to "${to}"`)
   if (currentProject() !== cur) broadcast({ type: 'project_renamed', from: cur, to: currentProject() })
@@ -1995,8 +1810,7 @@ app.post('/api/projects/rename', moveProject)
 app.post('/api/projects/delete', (req: Request, res: Response) => {
   if (projectsOff(res)) return
   const name = boardPath(req.body?.name)
-  if (!name || !projectFs.existsSync(projectDir(name)))
-    return res.status(404).json({ success: false, error: `no project ${name}` })
+  if (!name || !projectFs.existsSync(projectDir(name))) return fail(res, 404, `no project ${name}`)
   try {
     if (within(currentProject(), name)) {
       const next =
@@ -2013,7 +1827,7 @@ app.post('/api/projects/delete', (req: Request, res: Response) => {
     )
   } catch (error) {
     logger.error(`Could not delete project "${name}"`, error)
-    return res.status(500).json({ success: false, error: (error as Error).message })
+    return fail(res, 500, (error as Error).message)
   }
   logger.info(`Deleted project "${name}" (moved to trash)`)
   broadcast({ type: 'projects_changed' })
@@ -2023,10 +1837,10 @@ app.post('/api/projects/delete', (req: Request, res: Response) => {
 // Thumbnails for the Projects view. Only the canvas tab writes one (for the open board, scratch areas left out).
 app.post('/api/projects/thumb', express.raw({ type: 'image/png', limit: '2mb' }), (req: Request, res: Response) => {
   if (projectsOff(res)) return
-  if (!isTab(req)) return res.status(403).json({ success: false, error: 'canvas tab only' })
+  if (!isTab(req)) return fail(res, 403, 'canvas tab only')
   const name = boardPath(req.header('x-canvas-project'))
   if (!name || name !== currentProject() || !Buffer.isBuffer(req.body) || !req.body.length)
-    return res.status(409).json({ success: false, error: 'not the open board' })
+    return fail(res, 409, 'not the open board')
   projectFs.writeFileSync(path.join(projectDir(name), THUMB_FILE), req.body)
   res.json({ success: true })
 })
@@ -2074,10 +1888,7 @@ app.get('/api/sync/status', (_req: Request, res: Response) => {
 // Error handling middleware
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   logger.error('Unhandled error:', err)
-  res.status(500).json({
-    success: false,
-    error: 'Internal server error',
-  })
+  fail(res, 500, 'Internal server error')
 })
 
 // Start server
