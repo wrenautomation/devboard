@@ -12,33 +12,33 @@
 // canvas by spawning dist/server.js as a child process (see core/spawn.ts).
 
 // Disable colors to prevent ANSI color codes from breaking JSON parsing
-process.env.NODE_DISABLE_COLORS = '1';
-process.env.NO_COLOR = '1';
+process.env.NODE_DISABLE_COLORS = '1'
+process.env.NO_COLOR = '1'
 
-const argv = process.argv.slice(2);
+const argv = process.argv.slice(2)
 
 // Global --url flag: must land in the environment before any core module
 // (which reads EXPRESS_SERVER_URL at import time) is loaded.
 for (const [i, token] of argv.entries()) {
   if (token === '--url' && argv[i + 1]) {
-    process.env.EXPRESS_SERVER_URL = argv[i + 1];
-    argv.splice(i, 2);
-    break;
+    process.env.EXPRESS_SERVER_URL = argv[i + 1]
+    argv.splice(i, 2)
+    break
   }
   if (token.startsWith('--url=')) {
-    process.env.EXPRESS_SERVER_URL = token.slice('--url='.length);
-    argv.splice(i, 1);
-    break;
+    process.env.EXPRESS_SERVER_URL = token.slice('--url='.length)
+    argv.splice(i, 1)
+    break
   }
 }
 
 if (argv.length === 0) {
   // MCP mode: stdout belongs to the JSON-RPC transport from here on
-  const { runServer } = await import('./index.js');
-  await runServer();
+  const { runServer } = await import('./index.js')
+  await runServer()
 } else {
-  const { runCli } = await import('./cli/run.js');
-  await runCli(argv);
+  const { runCli } = await import('./cli/run.js')
+  await runCli(argv)
 }
 
-export {};
+export {}

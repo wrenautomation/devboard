@@ -91,4 +91,4 @@ export const DIAGRAM_DESIGN_GUIDE = `# Excalidraw Diagram Design Guide
 3. **Arrows** — connect shapes using binding IDs
 4. **Annotations** — standalone text elements for notes, titles
 5. **Refinement** — align, distribute, adjust spacing, screenshot to verify
-`;
+`

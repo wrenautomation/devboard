@@ -1,8 +1,8 @@
-import { defineConfig } from '@playwright/test';
+import { defineConfig } from '@playwright/test'
 
 // Never attach these destructive fixture tests to an existing user's canvas.
-const port = Number(process.env.CANVAS_TEST_PORT || 51910);
-const baseURL = `http://127.0.0.1:${port}`;
+const port = Number(process.env.CANVAS_TEST_PORT || 51910)
+const baseURL = `http://127.0.0.1:${port}`
 
 export default defineConfig({
   testDir: './tests/browser',
@@ -24,4 +24,4 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 15000,
   },
-});
+})

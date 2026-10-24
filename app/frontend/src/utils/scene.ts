@@ -3,7 +3,7 @@ import type { ExcalidrawElementSkeleton } from '@excalidraw/excalidraw/data/tran
 import type {
   ExcalidrawElement,
   ExcalidrawFreeDrawElement,
-  ExcalidrawImageElement
+  ExcalidrawImageElement,
 } from '@excalidraw/excalidraw/element/types'
 
 // An element as the converter and the caller's JSON see it: read and patched field by field. Excalidraw's
@@ -12,107 +12,100 @@ type ElementRecord = Record<string, unknown> & { id: string; type: string }
 const asElement = (record: ElementRecord): ExcalidrawElement => record as unknown as ExcalidrawElement
 
 export interface ServerElement {
-  id: string;
-  type: string;
-  x: number;
-  y: number;
-  width?: number;
-  height?: number;
-  backgroundColor?: string;
-  strokeColor?: string;
-  strokeWidth?: number;
-  roughness?: number;
-  opacity?: number;
-  text?: string;
-  fontSize?: number;
-  fontFamily?: string | number;
+  id: string
+  type: string
+  x: number
+  y: number
+  width?: number
+  height?: number
+  backgroundColor?: string
+  strokeColor?: string
+  strokeWidth?: number
+  roughness?: number
+  opacity?: number
+  text?: string
+  fontSize?: number
+  fontFamily?: string | number
   label?: {
-    text: string;
-  };
-  createdAt?: string;
-  updatedAt?: string;
-  version?: number;
-  syncedAt?: string;
-  source?: string;
-  syncTimestamp?: string;
-  boundElements?: readonly { id: string; type: string }[] | null;
-  containerId?: string | null;
-  locked?: boolean;
+    text: string
+  }
+  createdAt?: string
+  updatedAt?: string
+  version?: number
+  syncedAt?: string
+  source?: string
+  syncTimestamp?: string
+  boundElements?: readonly { id: string; type: string }[] | null
+  containerId?: string | null
+  locked?: boolean
   // Arrow element binding
-  start?: { id: string };
-  end?: { id: string };
-  strokeStyle?: string;
-  endArrowhead?: string;
-  startArrowhead?: string;
+  start?: { id: string }
+  end?: { id: string }
+  strokeStyle?: string
+  endArrowhead?: string
+  startArrowhead?: string
   // Image element fields
-  fileId?: string;
-  status?: string;
-  scale?: [number, number];
-  angle?: number;
-  link?: string | null;
-  frameId?: string | null;
-  name?: string | null;
+  fileId?: string
+  status?: string
+  scale?: [number, number]
+  angle?: number
+  link?: string | null
+  frameId?: string | null
+  name?: string | null
 }
 
 // Helper function to clean elements for Excalidraw
 export const cleanElementForExcalidraw = (element: ServerElement): Partial<ExcalidrawElement> => {
-  const {
-    createdAt,
-    updatedAt,
-    syncedAt,
-    source,
-    syncTimestamp,
-    ...cleanElement
-  } = element;
-  return cleanElement as Partial<ExcalidrawElement>;
+  const { createdAt, updatedAt, syncedAt, source, syncTimestamp, ...cleanElement } = element
+  return cleanElement as Partial<ExcalidrawElement>
 }
 
 // Helper function to validate and fix element binding data
 const validateAndFixBindings = (elements: Partial<ExcalidrawElement>[]): Partial<ExcalidrawElement>[] => {
-  const elementMap = new Map(elements.map(el => [el.id, el]));
+  const elementMap = new Map(elements.map(el => [el.id, el]))
 
   return elements.map(element => {
-    const fixedElement = { ...element };
+    const fixedElement = { ...element }
 
     // Validate and fix boundElements
     if (fixedElement.boundElements) {
       if (Array.isArray(fixedElement.boundElements)) {
         fixedElement.boundElements = fixedElement.boundElements.filter(binding => {
           // Ensure binding has required properties
-          if (!binding || typeof binding !== 'object') return false;
-          if (!binding.id || !binding.type) return false;
+          if (!binding || typeof binding !== 'object') return false
+          if (!binding.id || !binding.type) return false
 
           // Ensure the referenced element exists
-          const referencedElement = elementMap.get(binding.id);
-          if (!referencedElement) return false;
+          const referencedElement = elementMap.get(binding.id)
+          if (!referencedElement) return false
 
           // Validate binding type
-          if (!['text', 'arrow'].includes(binding.type)) return false;
+          if (!['text', 'arrow'].includes(binding.type)) return false
 
-          return true;
-        });
+          return true
+        })
 
         // Remove boundElements if empty
         if (fixedElement.boundElements.length === 0) {
-          fixedElement.boundElements = null;
+          fixedElement.boundElements = null
         }
       } else {
         // Invalid boundElements format, set to null
-        fixedElement.boundElements = null;
+        fixedElement.boundElements = null
       }
     }
 
     // Validate and fix containerId
     if (fixedElement.type === 'text' && fixedElement.containerId) {
-      const containerElement = elementMap.get(fixedElement.containerId);
+      const containerElement = elementMap.get(fixedElement.containerId)
       if (!containerElement) {
         // Container doesn't exist, remove containerId
-        fixedElement.containerId = null;
+        fixedElement.containerId = null
       }
     }
 
-    return fixedElement;
-  });
+    return fixedElement
+  })
 }
 
 const isImageElement = (element: Partial<ExcalidrawElement>): boolean => {
@@ -127,18 +120,18 @@ const isShapeContainerType = (type: string | undefined): boolean => {
   return type === 'rectangle' || type === 'ellipse' || type === 'diamond'
 }
 
-const recenterBoundShapeTextElements = (
-  elements: Partial<ExcalidrawElement>[]
-): Partial<ExcalidrawElement>[] => {
-  const elementMap = new Map(elements.map((el) => [el.id, el]))
+const recenterBoundShapeTextElements = (elements: Partial<ExcalidrawElement>[]): Partial<ExcalidrawElement>[] => {
+  const elementMap = new Map(elements.map(el => [el.id, el]))
 
-  return elements.map((element) => {
+  return elements.map(element => {
     if (element.type !== 'text' || !element.containerId) {
       return element
     }
 
     const textElement = element as ExcalidrawElement & { type: 'text'; containerId: string; autoResize?: boolean }
-    const container = elementMap.get(textElement.containerId) as (ExcalidrawElement & { x: number; y: number; width: number; height: number }) | undefined
+    const container = elementMap.get(textElement.containerId) as
+      | (ExcalidrawElement & { x: number; y: number; width: number; height: number })
+      | undefined
     if (!container || !isShapeContainerType(container.type)) {
       return element
     }
@@ -223,40 +216,41 @@ const normalizeFreedrawElement = (element: Partial<ExcalidrawElement>): Partial<
 // Helper: restore startBinding/endBinding/boundElements after convertToExcalidrawElements strips them
 const restoreBindings = (
   convertedElements: readonly ExcalidrawElement[],
-  originalElements: Partial<ExcalidrawElement>[]
+  originalElements: Partial<ExcalidrawElement>[],
 ): ExcalidrawElement[] => {
-  const originalMap = new Map<string, ElementRecord>();
+  const originalMap = new Map<string, ElementRecord>()
   for (const el of originalElements) {
-    if (el.id) originalMap.set(el.id, el as ElementRecord);
+    if (el.id) originalMap.set(el.id, el as ElementRecord)
   }
 
   return convertedElements.map(converted => {
-    const orig = originalMap.get(converted.id);
-    if (!orig) return converted;
+    const orig = originalMap.get(converted.id)
+    if (!orig) return converted
 
-    const el: ElementRecord = converted;
-    const patched: ElementRecord = { ...el };
+    const el: ElementRecord = converted
+    const patched: ElementRecord = { ...el }
 
     if (orig.startBinding && !el.startBinding) {
-      patched.startBinding = orig.startBinding;
+      patched.startBinding = orig.startBinding
     }
     if (orig.endBinding && !el.endBinding) {
-      patched.endBinding = orig.endBinding;
+      patched.endBinding = orig.endBinding
     }
     if (orig.boundElements && (!Array.isArray(el.boundElements) || el.boundElements.length === 0)) {
-      patched.boundElements = orig.boundElements;
+      patched.boundElements = orig.boundElements
     }
     if (orig.elbowed !== undefined && el.elbowed === undefined) {
-      patched.elbowed = orig.elbowed;
+      patched.elbowed = orig.elbowed
     }
 
-    return asElement(patched);
-  });
-};
+    return asElement(patched)
+  })
+}
 
 const isPointList = (points: unknown): points is [number, number][] =>
-  Array.isArray(points) && points.length >= 2 && points.every(p =>
-    Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]))
+  Array.isArray(points) &&
+  points.length >= 2 &&
+  points.every(p => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]))
 
 // The skeleton converter is not idempotent, and every server scene passes
 // through it on every update. Text x/y is read as an alignment anchor
@@ -266,7 +260,7 @@ const isPointList = (points: unknown): points is [number, number][] =>
 // converter still measures text and expands labels and bindings.
 const preserveCallerGeometry = (
   convertedElements: readonly ExcalidrawElement[],
-  originalElements: Partial<ExcalidrawElement>[]
+  originalElements: Partial<ExcalidrawElement>[],
 ): ExcalidrawElement[] => {
   const originalMap = new Map<string, ElementRecord>()
   for (const el of originalElements) {
@@ -312,9 +306,7 @@ const preserveCallerGeometry = (
 // replaces the label instead. The converter re-adds the text binding itself.
 // A shorthand label as an agent writes it (`label: { text }`), before the converter expands it.
 type Labelled = Partial<ExcalidrawElement> & { label?: { text?: string; id?: string } }
-const withStableLabelIds = (
-  elements: Partial<ExcalidrawElement>[]
-): Partial<ExcalidrawElement>[] =>
+const withStableLabelIds = (elements: Partial<ExcalidrawElement>[]): Partial<ExcalidrawElement>[] =>
   elements.map((element: Labelled) => {
     if (!element.id || element.type === 'text' || !element.label?.text) return element
     const bindings = Array.isArray(element.boundElements) ? element.boundElements : []
@@ -326,14 +318,16 @@ const withStableLabelIds = (
     }
   })
 
-const isFrame = (element: Partial<ExcalidrawElement>): element is Partial<Extract<ExcalidrawElement, { type: 'frame' | 'magicframe' }>> =>
+const isFrame = (
+  element: Partial<ExcalidrawElement>,
+): element is Partial<Extract<ExcalidrawElement, { type: 'frame' | 'magicframe' }>> =>
   element.type === 'frame' || element.type === 'magicframe'
 
 // A successful restore may still silently discard an unsupported or tiny
 // element. Never allow that partial scene to become a full-sync baseline.
 export const assertScenePreserved = (
   expected: readonly Partial<ExcalidrawElement>[],
-  actual: readonly Partial<ExcalidrawElement>[]
+  actual: readonly Partial<ExcalidrawElement>[],
 ): void => {
   const active = actual.filter(el => !el.isDeleted)
   const actualById = new Map(active.map(el => [el.id, el]))
@@ -373,19 +367,27 @@ export const prepareServerScene = (
      * otherwise keep the old line breaks — pass `true`.
      */
     refreshDimensions?: boolean
-  } = {}
+  } = {},
 ): ExcalidrawElement[] => {
   if (!Array.isArray(elements)) throw new Error('Expected a scene element array')
   const ids = new Set<string>()
   for (const element of elements) {
-    if (!element || typeof element.id !== 'string' || !element.id ||
-        typeof element.type !== 'string' || ids.has(element.id)) {
+    if (
+      !element ||
+      typeof element.id !== 'string' ||
+      !element.id ||
+      typeof element.type !== 'string' ||
+      ids.has(element.id)
+    ) {
       throw new Error('Scene contains an invalid or duplicate element ID')
     }
     ids.add(element.id)
-    if (!Number.isFinite(element.x) || !Number.isFinite(element.y) ||
-        (element.width !== undefined && !Number.isFinite(element.width)) ||
-        (element.height !== undefined && !Number.isFinite(element.height))) {
+    if (
+      !Number.isFinite(element.x) ||
+      !Number.isFinite(element.y) ||
+      (element.width !== undefined && !Number.isFinite(element.width)) ||
+      (element.height !== undefined && !Number.isFinite(element.height))
+    ) {
       throw new Error(`Scene contains invalid coordinates for ${element.id}`)
     }
   }
@@ -394,14 +396,14 @@ export const prepareServerScene = (
   // Native frames express membership through the children's frameId. The
   // skeleton converter instead requires frame.children and recalculates bounds.
   const skeletons = withStableLabelIds(
-    validated.filter(el => !isFrame(el) && !isImageElement(el) && !isFreedrawElement(el))
+    validated.filter(el => !isFrame(el) && !isImageElement(el) && !isFreedrawElement(el)),
   )
   const converted = preserveCallerGeometry(
     restoreBindings(
       convertToExcalidrawElements(skeletons as ExcalidrawElementSkeleton[], { regenerateIds: false }),
-      skeletons
+      skeletons,
     ),
-    skeletons
+    skeletons,
   )
   const convertedById = new Map(converted.map(el => [el.id, el]))
   const generatedText = new Map<string, ExcalidrawElement[]>()
@@ -417,10 +419,13 @@ export const prepareServerScene = (
   // and freehand strokes. Newly expanded labels sit beside their container.
   const ordered = validated.flatMap(element => {
     const id = element.id ?? ''
-    const next = isFrame(element) ? element
-      : isImageElement(element) ? normalizeImageElement(element)
-      : isFreedrawElement(element) ? normalizeFreedrawElement(element)
-      : convertedById.get(id)
+    const next = isFrame(element)
+      ? element
+      : isImageElement(element)
+        ? normalizeImageElement(element)
+        : isFreedrawElement(element)
+          ? normalizeFreedrawElement(element)
+          : convertedById.get(id)
     if (!next) throw new Error(`Scene conversion lost element ${id}`)
     return [next, ...(generatedText.get(id) || [])]
   })
@@ -442,18 +447,20 @@ export const prepareServerScene = (
       })
     : ordered
 
-  const restored = restoreElements(
-    recenterBoundShapeTextElements(reflowed) as ExcalidrawElement[],
-    null,
-    { repairBindings: true, refreshDimensions: opts.refreshDimensions ?? false }
-  )
+  const restored = restoreElements(recenterBoundShapeTextElements(reflowed) as ExcalidrawElement[], null, {
+    repairBindings: true,
+    refreshDimensions: opts.refreshDimensions ?? false,
+  })
   assertScenePreserved(elements, restored)
   // Conversion makes new shapes with version 1 and a random nonce. Offline sync compares the stored
   // version with the one the server confirmed, so every element keeps the version it came with.
   const source = new Map(elements.map(el => [el.id, el]))
   for (const el of restored as ElementRecord[]) {
     const from = source.get(el.id)
-    if (from && Number.isFinite(from.version)) { el.version = from.version; el.versionNonce = from.versionNonce ?? 0 }
+    if (from && Number.isFinite(from.version)) {
+      el.version = from.version
+      el.versionNonce = from.versionNonce ?? 0
+    }
   }
   return restored
 }

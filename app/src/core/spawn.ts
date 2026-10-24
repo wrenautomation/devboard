@@ -1,69 +1,70 @@
-import { spawn } from 'node:child_process';
-import { CodedError } from './errors.js';
-import { fileURLToPath } from 'node:url';
-import logger from '../utils/logger.js';
-import { EXPRESS_SERVER_URL, ENABLE_CANVAS_SYNC, EXCALIDRAW_NO_AUTOSTART } from './config.js';
-import { getHealth, CANVAS_SERVICE_NAME, foreignServiceError, markCanvasIdentityVerified } from './canvas-client.js';
+import { spawn } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import logger from '../utils/logger.js'
+import { CANVAS_SERVICE_NAME, foreignServiceError, getHealth, markCanvasIdentityVerified } from './canvas-client.js'
+import { ENABLE_CANVAS_SYNC, EXCALIDRAW_NO_AUTOSTART, EXPRESS_SERVER_URL } from './config.js'
+import { CodedError } from './errors.js'
 
-export { foreignServiceError };
-import { readPidFile, removePidFile } from './pidfile.js';
+export { foreignServiceError }
 
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+import { readPidFile, removePidFile } from './pidfile.js'
+
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1'])
 
 export function canvasPort(): number {
   try {
-    const url = new URL(EXPRESS_SERVER_URL);
-    return parseInt(url.port, 10) || (url.protocol === 'https:' ? 443 : 80);
+    const url = new URL(EXPRESS_SERVER_URL)
+    return parseInt(url.port, 10) || (url.protocol === 'https:' ? 443 : 80)
   } catch {
-    return 3000;
+    return 3000
   }
 }
 
 function canvasHostname(): string {
   try {
-    return new URL(EXPRESS_SERVER_URL).hostname;
+    return new URL(EXPRESS_SERVER_URL).hostname
   } catch {
-    return '127.0.0.1';
+    return '127.0.0.1'
   }
 }
 
 // The HOST the spawned server must bind so that health probes against
 // EXPRESS_SERVER_URL actually reach it (e.g. [::1] URLs need an IPv6 bind).
 function spawnBindHost(): string {
-  const hostname = canvasHostname();
-  if (hostname === 'localhost') return '127.0.0.1';
-  return hostname.replace(/^\[|\]$/g, '');
+  const hostname = canvasHostname()
+  if (hostname === 'localhost') return '127.0.0.1'
+  return hostname.replace(/^\[|\]$/g, '')
 }
 
 function isLoopbackUrl(): boolean {
-  return LOOPBACK_HOSTS.has(canvasHostname());
+  return LOOPBACK_HOSTS.has(canvasHostname())
 }
 
 function unreachableError(reason: string): Error {
   return new CodedError(
     `Canvas server is not reachable at ${EXPRESS_SERVER_URL} (${reason}). ` +
-    `Start it with \`mcp-excalidraw-server start\` or \`node dist/server.js\`.`,
-    'CANVAS_UNREACHABLE'
-  );
+      `Start it with \`mcp-excalidraw-server start\` or \`node dist/server.js\`.`,
+    'CANVAS_UNREACHABLE',
+  )
 }
 
 async function healthOrNull(timeoutMs = 500) {
   try {
-    return await getHealth(timeoutMs);
+    return await getHealth(timeoutMs)
   } catch {
-    return null;
+    return null
   }
 }
 
 // True only for a /health payload from OUR canvas server (v1.1+ identity
 // marker). Anything else answering the port is a foreign service.
 export function isCanvasHealth(health: { service?: string } | null): boolean {
-  return health !== null && health.service === CANVAS_SERVICE_NAME;
+  return health !== null && health.service === CANVAS_SERVICE_NAME
 }
 
 export interface EnsureResult {
-  url: string;
-  spawned: boolean;
+  url: string
+  spawned: boolean
 }
 
 /**
@@ -79,60 +80,62 @@ export interface EnsureResult {
  * the losing process exit, and every caller here only proceeds once /health
  * answers.
  */
-export async function ensureCanvasRunning(options: { timeoutMs?: number; force?: boolean } = {}): Promise<EnsureResult> {
-  const timeoutMs = options.timeoutMs ?? 8000;
+export async function ensureCanvasRunning(
+  options: { timeoutMs?: number; force?: boolean } = {},
+): Promise<EnsureResult> {
+  const timeoutMs = options.timeoutMs ?? 8000
 
-  const existing = await healthOrNull();
+  const existing = await healthOrNull()
   if (existing) {
     if (!isCanvasHealth(existing)) {
-      throw foreignServiceError();
+      throw foreignServiceError()
     }
-    markCanvasIdentityVerified();
-    return { url: EXPRESS_SERVER_URL, spawned: false };
+    markCanvasIdentityVerified()
+    return { url: EXPRESS_SERVER_URL, spawned: false }
   }
 
   if (!options.force) {
     if (EXCALIDRAW_NO_AUTOSTART) {
-      throw unreachableError('auto-start disabled by EXCALIDRAW_NO_AUTOSTART=1');
+      throw unreachableError('auto-start disabled by EXCALIDRAW_NO_AUTOSTART=1')
     }
     if (!ENABLE_CANVAS_SYNC) {
-      throw unreachableError('auto-start disabled because ENABLE_CANVAS_SYNC=false');
+      throw unreachableError('auto-start disabled because ENABLE_CANVAS_SYNC=false')
     }
   }
 
   if (!isLoopbackUrl()) {
-    throw unreachableError('refusing to auto-start a non-loopback canvas URL');
+    throw unreachableError('refusing to auto-start a non-loopback canvas URL')
   }
 
   // dist/core/spawn.js -> dist/server.js; spawn args must be path strings
-  const serverJs = fileURLToPath(new URL('../server.js', import.meta.url));
+  const serverJs = fileURLToPath(new URL('../server.js', import.meta.url))
   const child = spawn(process.execPath, [serverJs], {
     detached: true,
     stdio: 'ignore',
-    env: { ...process.env, PORT: String(canvasPort()), HOST: spawnBindHost() }
-  });
-  child.unref();
-  logger.info(`Auto-starting canvas server (pid ${child.pid}) at ${EXPRESS_SERVER_URL}`);
+    env: { ...process.env, PORT: String(canvasPort()), HOST: spawnBindHost() },
+  })
+  child.unref()
+  logger.info(`Auto-starting canvas server (pid ${child.pid}) at ${EXPRESS_SERVER_URL}`)
 
-  const deadline = Date.now() + timeoutMs;
+  const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     if (isCanvasHealth(await healthOrNull(400))) {
-      markCanvasIdentityVerified();
+      markCanvasIdentityVerified()
       process.stderr.write(
-        `Canvas server running at ${EXPRESS_SERVER_URL} — screenshots render headless; open it in a browser to watch or for mermaid conversion.\n`
-      );
-      return { url: EXPRESS_SERVER_URL, spawned: true };
+        `Canvas server running at ${EXPRESS_SERVER_URL} — screenshots render headless; open it in a browser to watch or for mermaid conversion.\n`,
+      )
+      return { url: EXPRESS_SERVER_URL, spawned: true }
     }
-    await new Promise(resolve => setTimeout(resolve, 250));
+    await new Promise(resolve => setTimeout(resolve, 250))
   }
 
-  throw unreachableError(`auto-started server did not become healthy within ${timeoutMs}ms`);
+  throw unreachableError(`auto-started server did not become healthy within ${timeoutMs}ms`)
 }
 
 export interface StopResult {
-  stopped: boolean;
-  pid?: number;
-  message: string;
+  stopped: boolean
+  pid?: number
+  message: string
 }
 
 /**
@@ -142,41 +145,46 @@ export interface StopResult {
  * recycled pids and unrelated apps squatting on the port are safe.
  */
 export async function stopCanvas(): Promise<StopResult> {
-  const port = canvasPort();
-  const filePid = readPidFile(port);
-  const health = await healthOrNull(2000);
+  const port = canvasPort()
+  const filePid = readPidFile(port)
+  const health = await healthOrNull(2000)
 
   if (!health) {
     if (filePid !== null) {
-      removePidFile(port);
-      return { stopped: false, pid: filePid, message: `Canvas server is not running; stale pidfile removed (pid ${filePid}).` };
+      removePidFile(port)
+      return {
+        stopped: false,
+        pid: filePid,
+        message: `Canvas server is not running; stale pidfile removed (pid ${filePid}).`,
+      }
     }
-    return { stopped: false, message: 'Canvas server is not running.' };
+    return { stopped: false, message: 'Canvas server is not running.' }
   }
 
   // Require the identity marker AND a sane positive pid: pid 0 / negative
   // values would make process.kill signal our own process group.
-  const pid = isCanvasHealth(health) && Number.isSafeInteger(health.pid) && (health.pid as number) > 0
-    ? health.pid as number
-    : null;
+  const pid =
+    isCanvasHealth(health) && Number.isSafeInteger(health.pid) && (health.pid as number) > 0
+      ? (health.pid as number)
+      : null
   if (pid === null) {
-    throw foreignServiceError();
+    throw foreignServiceError()
   }
 
   try {
-    process.kill(pid, 'SIGTERM');
+    process.kill(pid, 'SIGTERM')
   } catch (error) {
-    throw new Error(`Failed to signal canvas server (pid ${pid}): ${(error as Error).message}`);
+    throw new Error(`Failed to signal canvas server (pid ${pid}): ${(error as Error).message}`)
   }
 
-  const deadline = Date.now() + 5000;
+  const deadline = Date.now() + 5000
   while (Date.now() < deadline) {
     if (!(await healthOrNull(300))) {
-      removePidFile(port);
-      return { stopped: true, pid, message: `Canvas server (pid ${pid}) stopped.` };
+      removePidFile(port)
+      return { stopped: true, pid, message: `Canvas server (pid ${pid}) stopped.` }
     }
-    await new Promise(resolve => setTimeout(resolve, 200));
+    await new Promise(resolve => setTimeout(resolve, 200))
   }
 
-  throw new Error(`Canvas server (pid ${pid}) did not stop within 5s.`);
+  throw new Error(`Canvas server (pid ${pid}) did not stop within 5s.`)
 }

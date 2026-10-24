@@ -1,11 +1,11 @@
-import { parseMermaidToExcalidraw, type MermaidConfig } from '@excalidraw/mermaid-to-excalidraw';
-import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types';
-import type { BinaryFiles } from '@excalidraw/excalidraw/types';
+import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types'
+import type { BinaryFiles } from '@excalidraw/excalidraw/types'
+import { type MermaidConfig, parseMermaidToExcalidraw } from '@excalidraw/mermaid-to-excalidraw'
 
 export interface MermaidConversionResult {
-  elements: readonly ExcalidrawElement[];
-  files?: BinaryFiles;
-  error?: string;
+  elements: readonly ExcalidrawElement[]
+  files?: BinaryFiles
+  error?: string
 }
 
 /**
@@ -14,24 +14,24 @@ export interface MermaidConversionResult {
  */
 export const convertMermaidToExcalidraw = async (
   mermaidDefinition: string,
-  config?: MermaidConfig
+  config?: MermaidConfig,
 ): Promise<MermaidConversionResult> => {
   try {
     // Parse the Mermaid diagram to Excalidraw elements
-    const result = await parseMermaidToExcalidraw(mermaidDefinition, config);
-    
+    const result = await parseMermaidToExcalidraw(mermaidDefinition, config)
+
     return {
       elements: result.elements,
       files: result.files,
-    };
+    }
   } catch (error) {
-    console.error('Error converting Mermaid to Excalidraw:', error);
+    console.error('Error converting Mermaid to Excalidraw:', error)
     return {
       elements: [],
       error: error instanceof Error ? error.message : String(error),
-    };
+    }
   }
-};
+}
 
 /**
  * Default Mermaid configuration for Excalidraw conversion
@@ -46,4 +46,4 @@ export const DEFAULT_MERMAID_CONFIG: MermaidConfig = {
   },
   maxEdges: 500,
   maxTextSize: 50000,
-};
+}

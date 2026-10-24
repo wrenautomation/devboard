@@ -1,29 +1,29 @@
-import type { ExcalidrawFile, ServerElement } from '../../../types.js';
-import { loadExcalidrawNode, getDomWindow } from './dom.js';
-import { fnv1a } from '../../expand-elements.js';
-import type { SceneAppState } from '../index.js';
+import type { ExcalidrawFile, ServerElement } from '../../../types.js'
+import { fnv1a } from '../../expand-elements.js'
+import type { SceneAppState } from '../index.js'
+import { getDomWindow, loadExcalidrawNode } from './dom.js'
 
 // Render a scene to SVG with Excalidraw's own exporter running under jsdom.
 
 export interface ExcalidrawSvgOptions {
-  background: boolean;
-  viewBackgroundColor: string;
-  dark: boolean;
-  padding: number;
-  exportingFrame?: ServerElement | null;
+  background: boolean
+  viewBackgroundColor: string
+  dark: boolean
+  padding: number
+  exportingFrame?: ServerElement | null
 }
 
-const SERVER_ONLY_KEYS = ['createdAt', 'updatedAt', 'syncedAt', 'source', 'syncTimestamp'];
+const SERVER_ONLY_KEYS = ['createdAt', 'updatedAt', 'syncedAt', 'source', 'syncTimestamp']
 
 // Seeds drive roughjs's hand-drawn jitter. Server elements usually carry
 // none, and Excalidraw would pick random ones — derive them from the id so
 // an unchanged scene renders byte-identically.
 function withDeterministicSeeds(element: ServerElement): ServerElement {
-  const seeded = { ...element };
-  for (const key of SERVER_ONLY_KEYS) delete seeded[key];
-  if (typeof seeded.seed !== 'number') seeded.seed = (fnv1a(`${seeded.id}:seed`) % 2147483646) + 1;
-  if (typeof seeded.versionNonce !== 'number') seeded.versionNonce = (fnv1a(`${seeded.id}:nonce`) % 2147483646) + 1;
-  return seeded;
+  const seeded = { ...element }
+  for (const key of SERVER_ONLY_KEYS) delete seeded[key]
+  if (typeof seeded.seed !== 'number') seeded.seed = (fnv1a(`${seeded.id}:seed`) % 2147483646) + 1
+  if (typeof seeded.versionNonce !== 'number') seeded.versionNonce = (fnv1a(`${seeded.id}:nonce`) % 2147483646) + 1
+  return seeded
 }
 
 // Turn canvas-server elements (agent shorthand like label/start/end) or
@@ -32,8 +32,8 @@ function withDeterministicSeeds(element: ServerElement): ServerElement {
 // convertToExcalidrawElements + bound-text centering + restore), bundled in,
 // so headless renders match what the user sees.
 export async function prepareScene(elements: ServerElement[]): Promise<ServerElement[]> {
-  const mod = await loadExcalidrawNode();
-  return mod.prepareServerScene(elements.map(withDeterministicSeeds));
+  const mod = await loadExcalidrawNode()
+  return mod.prepareServerScene(elements.map(withDeterministicSeeds))
 }
 
 export async function serializeSceneForPng(
@@ -41,40 +41,41 @@ export async function serializeSceneForPng(
   files: Record<string, ExcalidrawFile>,
   appState: SceneAppState,
   exportingFrame: ServerElement | null,
-  sourceElements: ServerElement[]
+  sourceElements: ServerElement[],
 ): Promise<string> {
-  const mod = await loadExcalidrawNode();
+  const mod = await loadExcalidrawNode()
   // Match Excalidraw's frame export, including ungrouped overlapping elements.
   const scoped = exportingFrame
-    ? mod.elementsOverlappingBBox({ elements, bounds: exportingFrame, type: 'overlap' })
-      .filter(el => !el.frameId || el.frameId === exportingFrame.id)
-    : elements;
+    ? mod
+        .elementsOverlappingBBox({ elements, bounds: exportingFrame, type: 'overlap' })
+        .filter(el => !el.frameId || el.frameId === exportingFrame.id)
+    : elements
   // Preparation may bump versions/timestamps and generate random label seeds.
   // Preserve source metadata; use the same stable defaults as JSON scene export.
-  const sourceById = new Map(sourceElements.map(el => [el.id, el]));
-  const exportedIds = new Set(scoped.map(el => el.id));
+  const sourceById = new Map(sourceElements.map(el => [el.id, el]))
+  const exportedIds = new Set(scoped.map(el => el.id))
   const stable = scoped.map(el => {
-    const source = sourceById.get(el.id);
-    const timestamp = Date.parse(source?.updatedAt ?? source?.createdAt ?? '');
+    const source = sourceById.get(el.id)
+    const timestamp = Date.parse(source?.updatedAt ?? source?.createdAt ?? '')
     return withDeterministicSeeds({
       ...el,
       frameId: el.frameId && !exportedIds.has(el.frameId) ? null : el.frameId,
       seed: source?.seed,
       versionNonce: source?.versionNonce,
       version: source?.version ?? 1,
-      updated: typeof source?.updated === 'number' ? source.updated : Number.isNaN(timestamp) ? 1 : timestamp
-    });
-  });
-  return mod.serializeAsJSON(stable, appState, files, 'local');
+      updated: typeof source?.updated === 'number' ? source.updated : Number.isNaN(timestamp) ? 1 : timestamp,
+    })
+  })
+  return mod.serializeAsJSON(stable, appState, files, 'local')
 }
 
 export async function renderSvgWithExcalidraw(
   preparedElements: ServerElement[],
   files: Record<string, ExcalidrawFile>,
-  options: ExcalidrawSvgOptions
+  options: ExcalidrawSvgOptions,
 ): Promise<string> {
-  const mod = await loadExcalidrawNode();
-  const win = getDomWindow();
+  const mod = await loadExcalidrawNode()
+  const win = getDomWindow()
 
   const svg = await mod.exportToSvg({
     elements: preparedElements,
@@ -85,18 +86,18 @@ export async function renderSvgWithExcalidraw(
       exportScale: 1,
       exportEmbedScene: false,
       // Same frame rendering as the live tab
-      frameRendering: { enabled: true, name: true, outline: true, clip: true }
+      frameRendering: { enabled: true, name: true, outline: true, clip: true },
     },
     files,
     exportPadding: options.padding,
     exportingFrame: options.exportingFrame ?? null,
     skipInliningFonts: true,
-    renderEmbeddables: false
-  });
+    renderEmbeddables: false,
+  })
 
   // Excalidraw sets an explicit xmlns attribute; jsdom's serializer also emits
   // the namespace declaration, producing a duplicate attribute that XML
   // parsers reject. Browsers dedupe it, so drop the explicit one here.
-  svg.removeAttribute('xmlns');
-  return new win.XMLSerializer().serializeToString(svg);
+  svg.removeAttribute('xmlns')
+  return new win.XMLSerializer().serializeToString(svg)
 }

@@ -1,12 +1,12 @@
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { parseArgs, CliUsageError, readStdinBuffer } from '../args.js';
-import { printJson, note } from '../util.js';
-import { IMAGE_FLAG_SPEC, imageFormatFromFlags, imageOptionsFromFlags } from '../image-options.js';
-import { decodeSceneInput } from '../../core/scene-input.js';
-import { sceneFromJson } from '../../core/scene-io.js';
-import { renderScene } from '../../core/render/index.js';
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { renderScene } from '../../core/render/index.js'
+import { decodeSceneInput } from '../../core/scene-input.js'
+import { sceneFromJson } from '../../core/scene-io.js'
+import { CliUsageError, parseArgs, readStdinBuffer } from '../args.js'
+import { IMAGE_FLAG_SPEC, imageFormatFromFlags, imageOptionsFromFlags } from '../image-options.js'
+import { note, printJson } from '../util.js'
 
 // Render a scene file to PNG/SVG without a canvas server — for CI pipelines
 // that turn committed .excalidraw files into images, or for checking a file
@@ -14,55 +14,66 @@ import { renderScene } from '../../core/render/index.js';
 // PNG with an embedded scene, a bare element array, or `-` for stdin.
 
 export async function render(argv: string[]): Promise<void> {
-  const { positionals, flags } = parseArgs(argv, IMAGE_FLAG_SPEC);
+  const { positionals, flags } = parseArgs(argv, IMAGE_FLAG_SPEC)
   if ((flags.renderer as string | undefined) === 'browser') {
-    throw new CliUsageError('render works offline; use `screenshot --renderer browser` for tab rendering');
+    throw new CliUsageError('render works offline; use `screenshot --renderer browser` for tab rendering')
   }
 
-  const input = positionals[0];
-  const raw = decodeSceneInput(input && input !== '-' ? fs.readFileSync(path.resolve(input)) : await readStdinBuffer());
+  const input = positionals[0]
+  const raw = decodeSceneInput(input && input !== '-' ? fs.readFileSync(path.resolve(input)) : await readStdinBuffer())
   if (!raw.trim()) {
-    throw new CliUsageError('No scene provided (pass a .excalidraw / .excalidraw.md / embedded-scene PNG file or pipe a scene to stdin)');
+    throw new CliUsageError(
+      'No scene provided (pass a .excalidraw / .excalidraw.md / embedded-scene PNG file or pipe a scene to stdin)',
+    )
   }
 
-  let sceneData: ReturnType<typeof sceneFromJson>;
+  let sceneData: ReturnType<typeof sceneFromJson>
   try {
-    sceneData = sceneFromJson(JSON.parse(raw));
+    sceneData = sceneFromJson(JSON.parse(raw))
   } catch (error) {
-    throw new CliUsageError(`Invalid scene JSON: ${(error as Error).message}`);
+    throw new CliUsageError(`Invalid scene JSON: ${(error as Error).message}`)
   }
   if (sceneData.elements.length === 0) {
-    throw new CliUsageError('No elements found in the scene');
+    throw new CliUsageError('No elements found in the scene')
   }
 
-  const format = imageFormatFromFlags(flags);
-  const options = imageOptionsFromFlags(flags, format);
+  const format = imageFormatFromFlags(flags)
+  const options = imageOptionsFromFlags(flags, format)
   const scene = {
     // Agent-format (label/start/end) and native elements are both accepted;
     // the renderer prepares them the way the canvas tab does.
     elements: sceneData.elements,
     files: sceneData.files || {},
-    appState: sceneData.appState
-  };
+    appState: sceneData.appState,
+  }
 
-  const result = await renderScene(scene, options);
-  for (const warning of result.warnings) note(`warning: ${warning}`);
+  const result = await renderScene(scene, options)
+  for (const warning of result.warnings) note(`warning: ${warning}`)
 
-  let outPath = flags.out as string | undefined;
+  let outPath = flags.out as string | undefined
   if (!outPath && format === 'svg') {
-    process.stdout.write(`${result.data}\n`);
-    return;
+    process.stdout.write(`${result.data}\n`)
+    return
   }
   if (!outPath) {
-    const stem = input && input !== '-' ? path.basename(input).replace(/\.excalidraw(\.md|\.png)?$|\.json$|\.png$/i, '') : 'scene';
-    outPath = path.join(os.tmpdir(), `${stem}-${Date.now()}.png`);
+    const stem =
+      input && input !== '-' ? path.basename(input).replace(/\.excalidraw(\.md|\.png)?$|\.json$|\.png$/i, '') : 'scene'
+    outPath = path.join(os.tmpdir(), `${stem}-${Date.now()}.png`)
   }
 
-  const resolved = path.resolve(outPath);
+  const resolved = path.resolve(outPath)
   if (format === 'svg') {
-    fs.writeFileSync(resolved, result.data, 'utf-8');
+    fs.writeFileSync(resolved, result.data, 'utf-8')
   } else {
-    fs.writeFileSync(resolved, Buffer.from(result.data, 'base64'));
+    fs.writeFileSync(resolved, Buffer.from(result.data, 'base64'))
   }
-  printJson({ success: true, file: resolved, format, renderer: 'node', width: result.width, height: result.height, elements: scene.elements.length });
+  printJson({
+    success: true,
+    file: resolved,
+    format,
+    renderer: 'node',
+    width: result.width,
+    height: result.height,
+    elements: scene.elements.length,
+  })
 }

@@ -7,12 +7,12 @@
 // src/core/render/excalidraw-node/dom.ts imports after installing jsdom
 // globals. Runs as part of `npm run build:server`.
 
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { build } from 'esbuild';
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { build } from 'esbuild'
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const mermaidStub = path.join(root, 'scripts/stubs/mermaid-stub.mjs');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const mermaidStub = path.join(root, 'scripts/stubs/mermaid-stub.mjs')
 
 await build({
   entryPoints: [path.join(root, 'scripts/excalidraw-node-entry.mjs')],
@@ -31,7 +31,7 @@ await build({
   alias: { '@excalidraw/mermaid-to-excalidraw': mermaidStub, mermaid: mermaidStub },
   define: { 'process.env.NODE_ENV': '"production"' },
   legalComments: 'none',
-  logLevel: 'warning'
-});
+  logLevel: 'warning',
+})
 
-process.stderr.write('Built dist/render/excalidraw-node.mjs\n');
+process.stderr.write('Built dist/render/excalidraw-node.mjs\n')
