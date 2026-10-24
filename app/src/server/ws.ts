@@ -1,5 +1,6 @@
 import type { Server } from 'node:http'
 import WebSocket, { WebSocketServer } from 'ws'
+import logger from '../logger.js'
 import {
   elements,
   files,
@@ -7,7 +8,6 @@ import {
   type SyncStatusMessage,
   type WebSocketMessage,
 } from '../types.js'
-import logger from '../utils/logger.js'
 import { currentProject } from './boards.js'
 
 // WebSocket connections

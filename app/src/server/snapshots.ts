@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from 'express'
 import { commitCanvasMutation } from '../core/canvas-persistence.js'
+import logger from '../logger.js'
 import { elements, type Snapshot, snapshots } from '../types.js'
-import logger from '../utils/logger.js'
 import { fail, mutationErrorStatus } from './reply.js'
 import { visibleTo } from './scratch.js'
 

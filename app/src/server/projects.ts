@@ -2,8 +2,8 @@ import * as projectFs from 'node:fs'
 import path from 'node:path'
 import express, { type Express, type Request, type Response } from 'express'
 import { moveDurableDirectory, switchDurableDirectory } from '../core/canvas-persistence.js'
+import logger from '../logger.js'
 import { elements } from '../types.js'
-import logger from '../utils/logger.js'
 import {
   boardPath,
   CURRENT_FILE,

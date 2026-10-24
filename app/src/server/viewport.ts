@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from 'express'
 import { z } from 'zod'
+import logger from '../logger.js'
 import { generateId } from '../types.js'
-import logger from '../utils/logger.js'
 import { fail } from './reply.js'
 import { broadcast, clients } from './ws.js'
 

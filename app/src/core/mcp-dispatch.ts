@@ -1,8 +1,8 @@
 import fs from 'node:fs'
 import type { CallToolResult } from '@modelcontextprotocol/server'
 import { z } from 'zod'
+import logger from '../logger.js'
 import { EXCALIDRAW_ELEMENT_TYPES, type ExcalidrawElementType, type ServerElement } from '../types.js'
-import logger from '../utils/logger.js'
 import {
   type ApiResponse,
   batchCreateElementsOnCanvas,

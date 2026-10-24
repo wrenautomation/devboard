@@ -1,5 +1,5 @@
+import logger from '../logger.js'
 import type { ExcalidrawFile, ExportImageOptions, ServerElement } from '../types.js'
-import logger from '../utils/logger.js'
 import { ENABLE_CANVAS_SYNC, EXPRESS_SERVER_URL } from './config.js'
 import { CodedError } from './errors.js'
 

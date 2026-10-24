@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const mermaidStub = path.join(root, 'scripts/stubs/mermaid-stub.mjs')
+const mermaidStub = path.join(root, 'scripts/mermaid-stub.mjs')
 
 await build({
   entryPoints: [path.join(root, 'scripts/excalidraw-node-entry.mjs')],

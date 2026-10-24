@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import logger from '../utils/logger.js'
+import logger from '../logger.js'
 import { CANVAS_SERVICE_NAME, foreignServiceError, getHealth, markCanvasIdentityVerified } from './canvas-client.js'
 import { ENABLE_CANVAS_SYNC, EXCALIDRAW_NO_AUTOSTART, EXPRESS_SERVER_URL } from './config.js'
 import { CodedError } from './errors.js'

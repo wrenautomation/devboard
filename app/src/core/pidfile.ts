@@ -1,11 +1,11 @@
 import fs from 'node:fs'
 import { homedir } from 'node:os'
 import path from 'node:path'
-import logger from '../utils/logger.js'
+import logger from '../logger.js'
 
 /**
  * Platform-compatible state directory for runtime artifacts (pidfile),
- * mirroring the log-path convention in utils/logger.ts.
+ * mirroring the log-path convention in logger.ts.
  */
 function stateDir(): string {
   if (process.platform === 'darwin') {

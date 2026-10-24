@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from 'express'
 import { CanvasFileImmutabilityError, commitCanvasMutation, durableStatePath } from '../core/canvas-persistence.js'
+import logger from '../logger.js'
 import { type ExcalidrawFile, files } from '../types.js'
-import logger from '../utils/logger.js'
 import { fail, mutationErrorStatus } from './reply.js'
 import { broadcast } from './ws.js'
 
