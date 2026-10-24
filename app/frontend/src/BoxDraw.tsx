@@ -3,22 +3,7 @@
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
 import type React from 'react'
 import { useState } from 'react'
-
-export type Box = { x: number; y: number; w: number; h: number }
-
-export const boxStyle = (b: Box) => ({ left: b.x, top: b.y, width: b.w, height: b.h })
-
-// Scene coords <-> screen coords, from the canvas's current scroll and zoom.
-export function toScreen(api: ExcalidrawImperativeAPI, b: Box): Box {
-  const s = api.getAppState(),
-    z = s.zoom.value
-  return { x: (b.x + s.scrollX) * z + s.offsetLeft, y: (b.y + s.scrollY) * z + s.offsetTop, w: b.w * z, h: b.h * z }
-}
-export function toScene(api: ExcalidrawImperativeAPI, b: Box): Box {
-  const s = api.getAppState(),
-    z = s.zoom.value
-  return { x: (b.x - s.offsetLeft) / z - s.scrollX, y: (b.y - s.offsetTop) / z - s.scrollY, w: b.w / z, h: b.h / z }
-}
+import { type Box, boxStyle, toScene } from './view'
 
 // Full-screen layer. onDone gets the box in scene coords; a box under 12px is ignored.
 export function BoxDraw({

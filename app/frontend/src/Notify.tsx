@@ -3,10 +3,12 @@
 // Claude then screenshots only that part, which keeps the image small. Mic = Safari speech to text.
 
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
-import { Send } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { type Box, BoxDraw, boxStyle, toScreen } from './BoxDraw'
+import { getJson, postJson } from './api'
+import { BoxDraw } from './BoxDraw'
+import { Send } from './icons'
 import { appendSaid, canDictate, useDictation } from './speech'
+import { type Box, boxStyle, toScreen } from './view'
 
 type Session = {
   watch: string
@@ -53,16 +55,10 @@ export function Notify({ api, flush }: { api: ExcalidrawImperativeAPI | null; fl
   // Live sessions and who listens, each time the panel opens.
   useEffect(() => {
     if (!open) return
-    fetch('/api/sessions')
-      .then(r => r.json())
-      .then(d => {
-        setSessions(d.sessions ?? [])
-        setOthers(d.others ?? [])
-      })
-      .catch(() => {
-        setSessions([])
-        setOthers([])
-      })
+    void getJson<{ sessions?: Session[]; others?: string[] }>('/api/sessions').then(d => {
+      setSessions(d?.sessions ?? [])
+      setOthers(d?.others ?? [])
+    })
   }, [open])
   const listening = sessions.filter(x => x.listening).length + others.length
   // Enter on the Mac: only for one picked session that runs in a VS Code terminal.
@@ -103,13 +99,14 @@ export function Notify({ api, flush }: { api: ExcalidrawImperativeAPI | null; fl
     setStatus('Sending…')
     try {
       await flush() // Claude reads the saved scene, so save first.
-      const r = await fetch('/api/notify', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text, ids, box, to, area: !!area, enter: canEnter && enter }),
+      const d = await postJson<{ reached: number; entered: boolean }>('/api/notify', {
+        text,
+        ids,
+        box,
+        to,
+        area: !!area,
+        enter: canEnter && enter,
       })
-      const d = await r.json()
-      if (!r.ok) throw new Error(d.error)
       setText('')
       setArea(null)
       setStatus(

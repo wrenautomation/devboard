@@ -1,20 +1,81 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
-  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
   "files": {
     "includes": ["**", "!**/dist", "!library/src", "!library/*.excalidrawlib"]
   },
-  "formatter": { "indentStyle": "space", "indentWidth": 2, "lineWidth": 120 },
-  "javascript": { "formatter": { "quoteStyle": "single", "semicolons": "asNeeded", "arrowParentheses": "asNeeded" } },
-  "css": { "formatter": { "enabled": false } },
-  "linter": { "enabled": true, "rules": { "preset": "recommended" } },
+  "formatter": {
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 120
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "semicolons": "asNeeded",
+      "arrowParentheses": "asNeeded"
+    }
+  },
+  "css": {
+    "formatter": {
+      "enabled": false
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended"
+    }
+  },
   "overrides": [
     {
       "includes": ["app/frontend/src/wren.css"],
       "linter": {
         "rules": {
-          "complexity": { "noImportantStyles": "off" },
-          "style": { "noDescendingSpecificity": "off" }
+          "complexity": {
+            "noImportantStyles": "off"
+          },
+          "style": {
+            "noDescendingSpecificity": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["app/frontend/src/**", "!app/frontend/src/icons.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "lucide-react": "Name the icon in frontend/src/icons.ts and import it from there: one registry, so an icon changes in one place."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["app/frontend/src/**", "!app/frontend/src/api.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedGlobals": {
+              "level": "error",
+              "options": {
+                "deniedGlobals": {
+                  "fetch": "The canvas reaches its server through frontend/src/api.ts: one door for headers, timeouts and errors."
+                }
+              }
+            }
+          }
         }
       }
     }

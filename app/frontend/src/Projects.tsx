@@ -2,6 +2,8 @@
 // a breadcrumb, folders first, then boards with a thumbnail. Each item has Rename, Move and Delete.
 // The server does the work (/api/projects*); every tab gets projects_changed and refreshes.
 
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { getJson, postJson } from './api'
 import {
   ChevronDown,
   ChevronRight,
@@ -12,8 +14,7 @@ import {
   Plus,
   Search,
   X,
-} from 'lucide-react'
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+} from './icons'
 
 type Board = { path: string; updated: number; thumb: boolean }
 type State = { current: string; boards: Board[]; folders: string[] }
@@ -23,16 +24,6 @@ type Ask =
   | { kind: 'move'; target: string }
   | { kind: 'delete'; target: string }
 
-const postJson = async (url: string, body: unknown) => {
-  const r = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  const d = await r.json().catch(() => ({}))
-  if (!r.ok || !d.success) throw new Error(d.error || `HTTP ${r.status}`)
-  return d
-}
 const parent = (p: string) => p.split('/').slice(0, -1).join('/')
 const base = (p: string) => p.slice(p.lastIndexOf('/') + 1)
 const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name)
@@ -79,14 +70,7 @@ export function Projects({
   const [error, setError] = useState('')
   const [nonce, setNonce] = useState(0) // busts the open board's thumbnail after it is saved again
 
-  const refresh = useCallback(
-    () =>
-      fetch('/api/projects')
-        .then(r => (r.ok ? r.json() : null))
-        .then(d => d && setState(d))
-        .catch(() => {}),
-    [],
-  )
+  const refresh = useCallback(() => getJson<State>('/api/projects').then(d => d && setState(d)), [])
   useEffect(() => {
     void refresh()
     const onChange = () => void refresh()

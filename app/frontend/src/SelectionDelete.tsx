@@ -4,9 +4,9 @@
 import { CaptureUpdateAction, getCommonBounds, newElementWith } from '@excalidraw/excalidraw'
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
-import { X } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { type Box, toScreen } from './BoxDraw'
+import { X } from './icons'
+import { type Box, toScreen } from './view'
 
 export function SelectionDelete({ api, flush }: { api: ExcalidrawImperativeAPI | null; flush: () => Promise<void> }) {
   const [at, setAt] = useState<Box | null>(null)

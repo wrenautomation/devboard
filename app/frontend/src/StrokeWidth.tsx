@@ -5,9 +5,10 @@
 
 import { CaptureUpdateAction } from '@excalidraw/excalidraw'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
-import { ChevronDown } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { edited } from './edits'
+import { ChevronDown } from './icons'
 
 const PRESETS: [number, string][] = [
   [0.5, 'Fine'],
@@ -84,17 +85,9 @@ export function StrokeWidth({ api }: { api: ExcalidrawImperativeAPI | null }) {
     const picked = api.getAppState().selectedElementIds
     api.updateScene({
       appState: { currentItemStrokeWidth: value },
-      elements: api.getSceneElementsIncludingDeleted().map(e =>
-        picked[e.id] && !e.isDeleted
-          ? {
-              ...e,
-              strokeWidth: value,
-              version: e.version + 1,
-              versionNonce: Math.floor(Math.random() * 2 ** 31),
-              updated: Date.now(),
-            }
-          : e,
-      ),
+      elements: api
+        .getSceneElementsIncludingDeleted()
+        .map(e => (picked[e.id] && !e.isDeleted ? edited(e, { strokeWidth: value }) : e)),
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     })
   }

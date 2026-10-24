@@ -5,9 +5,11 @@
 import { CaptureUpdateAction, restoreElements } from '@excalidraw/excalidraw'
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
-import { EyeOff } from 'lucide-react'
 import { useState } from 'react'
-import { type Box, BoxDraw } from './BoxDraw'
+import { BoxDraw } from './BoxDraw'
+import { edited } from './edits'
+import { EyeOff } from './icons'
+import type { Box } from './view'
 
 export const SCRATCH_NAME = 'Scratch (Claude ignores)'
 
@@ -64,17 +66,9 @@ export function Scratch({ api, flush }: { api: ExcalidrawImperativeAPI | null; f
         cy = e.y + e.height / 2
       return !e.frameId && e.type !== 'frame' && cx >= b.x && cx <= b.x + b.w && cy >= b.y && cy <= b.y + b.h
     }
-    const elements = api.getSceneElementsIncludingDeleted().map(e =>
-      !e.isDeleted && inside(e)
-        ? {
-            ...e,
-            frameId: frame.id,
-            version: e.version + 1,
-            versionNonce: Math.floor(Math.random() * 2 ** 31),
-            updated: Date.now(),
-          }
-        : e,
-    )
+    const elements = api
+      .getSceneElementsIncludingDeleted()
+      .map(e => (!e.isDeleted && inside(e) ? edited(e, { frameId: frame.id }) : e))
     api.updateScene({
       elements: [...elements, frame],
       appState: { selectedElementIds: {} },

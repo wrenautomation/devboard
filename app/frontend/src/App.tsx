@@ -19,9 +19,10 @@ import type {
   SceneData,
 } from '@excalidraw/excalidraw/types'
 import type { MermaidConfig } from '@excalidraw/mermaid-to-excalidraw'
-import { Eraser, Shapes } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { fetchJson, getJson, loadPack, post, postBinary, postJson, TAB } from './api'
 import { IconPanel } from './IconPanel'
+import { Eraser, Shapes } from './icons'
 import { Notify } from './Notify'
 import { Projects } from './Projects'
 import { Scratch, withoutScratch } from './Scratch'
@@ -32,9 +33,6 @@ import { convertMermaidToExcalidraw, DEFAULT_MERMAID_CONFIG } from './utils/merm
 import type { ServerElement } from './utils/scene'
 import { assertScenePreserved, cleanElementForExcalidraw, prepareServerScene } from './utils/scene'
 import { Voice } from './Voice'
-
-// Local patch: marks the canvas tab, so the server shows it scratch areas (agents get them hidden).
-const TAB = { 'x-devboard-tab': '1' }
 
 const LIBRARY_STORAGE_KEY = 'excalidraw-canvas-library'
 
@@ -69,12 +67,10 @@ const libraryAdapter: LibraryPersistenceAdapter = {
       const raw = window.localStorage?.getItem(LIBRARY_STORAGE_KEY)
       if (raw) return { libraryItems: JSON.parse(raw) }
       // First visit: start with the canvas's own pack (brand logos, system design, stickies).
-      const pack = await fetch('/lib/wren.excalidrawlib')
-        .then(r => (r.ok ? r.json() : null))
-        .catch(() => null)
-      if (!pack?.libraryItems) return null
-      await libraryAdapter.save({ libraryItems: pack.libraryItems })
-      return { libraryItems: pack.libraryItems }
+      const pack = await loadPack()
+      if (!pack.length) return null
+      await libraryAdapter.save({ libraryItems: pack })
+      return { libraryItems: pack }
     } catch (error) {
       console.warn('Failed to read library:', error)
       return null
@@ -154,11 +150,7 @@ async function postThumb(api: ExcalidrawImperativeAPI, project: string) {
     mimeType: 'image/png',
     appState: { ...api.getAppState(), exportBackground: true, exportWithDarkMode: false },
   })
-  await fetch('/api/projects/thumb', {
-    method: 'POST',
-    headers: { 'content-type': 'image/png', 'x-devboard-tab': '1', 'x-canvas-project': project },
-    body: blob,
-  })
+  await postBinary('/api/projects/thumb', blob, { ...TAB, 'x-canvas-project': project })
 }
 
 // Type definitions
@@ -288,15 +280,12 @@ function App(): JSX.Element {
   const loadedOnceRef = useRef<boolean>(false)
   const [iconsOpen, setIconsOpen] = useState(false)
   useEffect(() => {
-    fetch('/api/projects')
-      .then(r => (r.ok ? r.json() : null))
-      .then(d => {
-        if (d && !projectRef.current) {
-          projectRef.current = d.current
-          rememberProject(d.current)
-        }
-      })
-      .catch(() => {})
+    void getJson<{ current: string }>('/api/projects').then(d => {
+      if (d && !projectRef.current) {
+        projectRef.current = d.current
+        rememberProject(d.current)
+      }
+    })
     const onProject = (e: Event) => {
       const project = (e as CustomEvent<string>).detail
       projectRef.current = project
@@ -415,9 +404,7 @@ function App(): JSX.Element {
   // The board the Mac has open. Offline, the last board this browser showed.
   const resolveProject = async (): Promise<string | null> => {
     if (!projectRef.current) {
-      const p = await fetch('/api/projects')
-        .then(r => (r.ok ? r.json() : null))
-        .catch(() => null)
+      const p = await getJson<{ current: string }>('/api/projects')
       if (p && !projectRef.current) {
         projectRef.current = p.current
         rememberProject(p.current)
@@ -695,16 +682,15 @@ function App(): JSX.Element {
     if (!excalidrawAPIRef.current) return
     const generation = pauseSceneSync()
     try {
-      const response = await fetch('/api/elements', { signal: AbortSignal.timeout(10000), headers: TAB }) // the tab sees scratch areas; agents do not
-      const result: ApiResponse = await response.json()
+      // The tab sees scratch areas; agents do not.
+      const result = await fetchJson<ApiResponse>('/api/elements', { headers: TAB, timeoutMs: 10000 })
       if (generation !== sceneGenerationRef.current) return
-      if (!response.ok || !result.success || !Array.isArray(result.elements)) {
+      if (!result.success || !Array.isArray(result.elements)) {
         throw new Error(result.error || 'Invalid scene response')
       }
-      const filesResponse = await fetch('/api/files', { signal: AbortSignal.timeout(10000) })
-      const filesResult = (await filesResponse.json()) as ApiResponse
+      const filesResult = await fetchJson<ApiResponse>('/api/files', { timeoutMs: 10000 })
       if (generation !== sceneGenerationRef.current) return
-      if (!filesResponse.ok || !filesResult.files) {
+      if (!filesResult.files) {
         throw new Error('Could not load scene files')
       }
       await preloadCanvasFonts()
@@ -902,6 +888,10 @@ function App(): JSX.Element {
 
         case 'export_image_request':
           if (data.requestId) {
+            const requestId = data.requestId
+            // The server collects the tabs' results; a report that fails to send is not the export's problem.
+            const report = (result: { format: 'png' | 'svg'; data: string } | { error: string }) =>
+              postJson('/api/export/image/result', { requestId, ...result }).catch(() => {})
             try {
               if (!canSyncScene()) throw new Error('Scene is not fully loaded; export is paused')
               // Same option surface as the headless renderer (renderer:'node'),
@@ -969,16 +959,7 @@ function App(): JSX.Element {
                   exportPadding: opts.padding,
                   exportingFrame,
                 })
-                const svgString = new XMLSerializer().serializeToString(svg)
-                await fetch('/api/export/image/result', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    requestId: data.requestId,
-                    format: 'svg',
-                    data: svgString,
-                  }),
-                })
+                await report({ format: 'svg', data: new XMLSerializer().serializeToString(svg) })
               } else {
                 const blob = await exportToBlob({
                   elements: exportElements,
@@ -996,50 +977,21 @@ function App(): JSX.Element {
                     if (!base64) {
                       throw new Error('Could not extract base64 data from result')
                     }
-                    await fetch('/api/export/image/result', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        requestId: data.requestId,
-                        format: 'png',
-                        data: base64,
-                      }),
-                    })
+                    await report({ format: 'png', data: base64 })
                   } catch (readerError) {
                     console.error('Image export (FileReader) failed:', readerError)
-                    await fetch('/api/export/image/result', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        requestId: data.requestId,
-                        error: (readerError as Error).message,
-                      }),
-                    }).catch(() => {})
+                    await report({ error: (readerError as Error).message })
                   }
                 }
                 reader.onerror = async () => {
                   console.error('FileReader error:', reader.error)
-                  await fetch('/api/export/image/result', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      requestId: data.requestId,
-                      error: reader.error?.message || 'FileReader failed',
-                    }),
-                  }).catch(() => {})
+                  await report({ error: reader.error?.message || 'FileReader failed' })
                 }
                 reader.readAsDataURL(blob)
               }
             } catch (exportError) {
               console.error('Image export failed:', exportError)
-              await fetch('/api/export/image/result', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  requestId: data.requestId,
-                  error: (exportError as Error).message,
-                }),
-              })
+              await report({ error: (exportError as Error).message })
             }
           }
           break
@@ -1099,24 +1051,16 @@ function App(): JSX.Element {
                 }
               }
 
-              await fetch('/api/viewport/result', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  requestId: data.requestId,
-                  success: true,
-                  message: 'Viewport updated',
-                }),
+              await post('/api/viewport/result', {
+                requestId: data.requestId,
+                success: true,
+                message: 'Viewport updated',
               })
             } catch (viewportError) {
               console.error('Viewport control failed:', viewportError)
-              await fetch('/api/viewport/result', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  requestId: data.requestId,
-                  error: (viewportError as Error).message,
-                }),
+              await post('/api/viewport/result', {
+                requestId: data.requestId,
+                error: (viewportError as Error).message,
               }).catch(() => {})
             }
           }
@@ -1225,39 +1169,20 @@ function App(): JSX.Element {
         file => usedFileIds.has(file.id) && file.dataURL && !serverFileIdsRef.current.has(file.id),
       )
       for (const file of newFiles) {
-        const fileResponse = await fetch('/api/files', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            files: [
-              {
-                id: file.id,
-                dataURL: file.dataURL,
-                mimeType: file.mimeType,
-                created: file.created,
-              },
-            ],
-          }),
-        })
-        if (!fileResponse.ok) throw new Error(`Image upload failed: HTTP ${fileResponse.status}`)
+        const { id, dataURL, mimeType, created } = file
+        const upload = await post('/api/files', { files: [{ id, dataURL, mimeType, created }] })
+        if (!upload.ok) throw new Error(`Image upload failed: HTTP ${upload.status}`)
         serverFileIdsRef.current.add(file.id)
       }
 
-      const response = await fetch('/api/elements/push', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...TAB,
-          ...(project ? { 'x-canvas-project': project } : {}),
-        },
-        body: JSON.stringify({ elements: sent }),
-      })
+      const response = await post<{
+        applied: { id: string; version: number; versionNonce: number }[]
+        rejected: ServerElement[]
+        error?: string
+      }>('/api/elements/push', { elements: sent }, { ...TAB, ...(project ? { 'x-canvas-project': project } : {}) })
 
       if (response.ok) {
-        const result = (await response.json()) as {
-          applied: { id: string; version: number; versionNonce: number }[]
-          rejected: ServerElement[]
-        }
+        const result = response.data
         // The scene moved to another board meanwhile: its acks are not this board's.
         if (sceneProjectRef.current !== project) return
         setPushFailed(false)
@@ -1285,8 +1210,7 @@ function App(): JSX.Element {
           autoSyncTimerRef.current = null
         }
       } else {
-        const error: ApiResponse = await response.json()
-        console.error('Push failed:', error.error)
+        console.error('Push failed:', response.data.error)
         if (!silent) {
           setSyncStatus('error')
         }
