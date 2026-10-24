@@ -2,25 +2,17 @@ import {
   CaptureUpdateAction,
   convertToExcalidrawElements,
   Excalidraw,
-  elementsOverlappingBBox,
   exportToBlob,
-  exportToSvg,
   newElementWith,
   reconcileElements,
   useHandleLibrary,
 } from '@excalidraw/excalidraw'
-import type { LibraryPersistedData, LibraryPersistenceAdapter } from '@excalidraw/excalidraw/data/library'
-import type { ExcalidrawElement, ExcalidrawFrameLikeElement, NonDeleted } from '@excalidraw/excalidraw/element/types'
-import type {
-  AppState,
-  BinaryFileData,
-  ExcalidrawImperativeAPI,
-  LibraryItems,
-  SceneData,
-} from '@excalidraw/excalidraw/types'
+import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types'
+import type { AppState, BinaryFileData, ExcalidrawImperativeAPI, SceneData } from '@excalidraw/excalidraw/types'
 import type { MermaidConfig } from '@excalidraw/mermaid-to-excalidraw'
 import { useEffect, useRef, useState } from 'react'
-import { fetchJson, getJson, loadPack, post, postBinary, postJson, TAB } from './api'
+import { fetchJson, getJson, post, postBinary, TAB } from './api'
+import { type ExportImageOptions, exportForServer } from './export'
 import { IconPanel } from './IconPanel'
 import { Eraser, Shapes } from './icons'
 import { Notify } from './Notify'
@@ -28,116 +20,26 @@ import { Projects } from './Projects'
 import { Scratch, withoutScratch } from './Scratch'
 import { SelectionDelete } from './SelectionDelete'
 import { StrokeWidth } from './StrokeWidth'
+import {
+  asFileMap,
+  dropReplica,
+  lastProject,
+  libraryAdapter,
+  readFile,
+  readReplica,
+  rememberProject,
+  type ServerFiles,
+  sceneVersion,
+  stamp,
+  writeFile,
+  writeReplica,
+} from './store'
 import { preloadCanvasFonts } from './utils/fonts'
 import { convertMermaidToExcalidraw, DEFAULT_MERMAID_CONFIG } from './utils/mermaidConverter'
 import type { ServerElement } from './utils/scene'
 import { assertScenePreserved, cleanElementForExcalidraw, prepareServerScene } from './utils/scene'
 import { Voice } from './Voice'
-
-const LIBRARY_STORAGE_KEY = 'excalidraw-canvas-library'
-
-/**
- * Persists the user's library in this browser.
- *
- * The scene is in-memory by design, but the library is not scene data — it is a
- * user asset: shapes they added themselves, or a pack they installed from
- * libraries.excalidraw.com. Without an adapter the library panel resets to empty
- * on every reload, which makes it useless, and `useHandleLibrary` below needs one
- * to accept installs in the first place.
- */
-// Local patch: IndexedDB, not localStorage. Safari's 5MB localStorage quota can't hold a big icon pack.
-// Reads the old localStorage copy once, if there is one.
-const libraryDb = (): Promise<IDBDatabase> =>
-  new Promise((resolve, reject) => {
-    const req = indexedDB.open('excalidraw-canvas', 1)
-    req.onupgradeneeded = () => req.result.createObjectStore('kv')
-    req.onsuccess = () => resolve(req.result)
-    req.onerror = () => reject(req.error)
-  })
-const libraryAdapter: LibraryPersistenceAdapter = {
-  load: async () => {
-    try {
-      const db = await libraryDb()
-      const items = await new Promise<LibraryItems | undefined>((resolve, reject) => {
-        const req = db.transaction('kv').objectStore('kv').get(LIBRARY_STORAGE_KEY)
-        req.onsuccess = () => resolve(req.result)
-        req.onerror = () => reject(req.error)
-      })
-      if (items) return { libraryItems: items }
-      const raw = window.localStorage?.getItem(LIBRARY_STORAGE_KEY)
-      if (raw) return { libraryItems: JSON.parse(raw) }
-      // First visit: start with the canvas's own pack (brand logos, system design, stickies).
-      const pack = await loadPack()
-      if (!pack.length) return null
-      await libraryAdapter.save({ libraryItems: pack })
-      return { libraryItems: pack }
-    } catch (error) {
-      console.warn('Failed to read library:', error)
-      return null
-    }
-  },
-  save: async (data: LibraryPersistedData) => {
-    try {
-      const db = await libraryDb()
-      await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction('kv', 'readwrite')
-        tx.objectStore('kv').put(data.libraryItems, LIBRARY_STORAGE_KEY)
-        tx.oncomplete = () => resolve()
-        tx.onerror = () => reject(tx.error)
-      })
-      window.localStorage?.removeItem(LIBRARY_STORAGE_KEY)
-    } catch (error) {
-      console.warn('Failed to save library:', error)
-    }
-  },
-}
-
-// Local patch: offline first. Each board has a replica in this browser: its elements and, per element,
-// the version the Mac last confirmed (acked). An element whose version differs from its ack is pending:
-// the next push sends it. The Mac keeps the newer version of each element, so a retry is safe.
-type Replica = { elements: ExcalidrawElement[]; acked: Record<string, string> }
-const replicaKey = (project: string) => `replica:${project}`
-const stamp = (el: { version?: number; versionNonce?: number }) => `${el.version}:${el.versionNonce ?? 0}`
-// The board to open from the replica when the Mac can't be reached.
-const LAST_PROJECT_KEY = 'canvas-last-project'
-const lastProject = () => {
-  try {
-    return window.localStorage?.getItem(LAST_PROJECT_KEY) ?? null
-  } catch {
-    return null
-  }
-}
-const rememberProject = (p: string) => {
-  try {
-    window.localStorage?.setItem(LAST_PROJECT_KEY, p)
-  } catch {
-    /* private mode */
-  }
-}
-const idb = async <T,>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> => {
-  const db = await libraryDb()
-  return new Promise<T>((resolve, reject) => {
-    const req = run(db.transaction('kv', mode).objectStore('kv'))
-    req.onsuccess = () => resolve(req.result)
-    req.onerror = () => reject(req.error)
-  })
-}
-const readReplica = (project: string) =>
-  idb<Replica | undefined>('readonly', st => st.get(replicaKey(project))).catch(() => undefined)
-const writeReplica = (project: string, r: Replica) =>
-  idb('readwrite', st => st.put(r, replicaKey(project))).catch(() => undefined)
-const dropReplica = (project: string) => idb('readwrite', st => st.delete(replicaKey(project))).catch(() => undefined)
-// Image data once per file, apart from the replica: it never changes, and it is the bulk of the bytes.
-const readFile = (id: string) =>
-  idb<BinaryFileData | undefined>('readonly', st => st.get(`file:${id}`)).catch(() => undefined)
-const writeFile = (f: BinaryFileData) => idb('readwrite', st => st.put(f, `file:${f.id}`)).catch(() => undefined)
-// The server's files: a map by id (a scene) or a list (files_added); the canvas wants the map.
-type ServerFiles = Record<string, BinaryFileData>
-const asFileMap = (files: ServerFiles | BinaryFileData[] | undefined): ServerFiles | undefined =>
-  Array.isArray(files) ? Object.fromEntries(files.map(f => [f.id, f])) : files
-// Changes whenever any element is added, edited or deleted (Excalidraw bumps `version` on each edit).
-const sceneVersion = (els: readonly { version: number }[]): number =>
-  els.reduce((sum, el) => sum + el.version, 0) * 1000 + els.length
+import { applyViewport } from './viewport'
 
 // Local patch: thumbnail of the open board for the Projects view; scratch areas are left out.
 async function postThumb(api: ExcalidrawImperativeAPI, project: string) {
@@ -155,18 +57,6 @@ async function postThumb(api: ExcalidrawImperativeAPI, project: string) {
 
 // Type definitions
 type ExcalidrawAPIRefValue = ExcalidrawImperativeAPI
-
-interface ExportImageOptions {
-  background?: boolean
-  dark?: boolean
-  scale?: number
-  padding?: number
-  elementIds?: string[]
-  frameId?: string
-  area?: { x: number; y: number; w: number; h: number }
-  hide?: string[]
-  embedScene?: boolean
-}
 
 interface WebSocketMessage {
   type: string
@@ -887,183 +777,16 @@ function App(): JSX.Element {
           break
 
         case 'export_image_request':
-          if (data.requestId) {
-            const requestId = data.requestId
-            // The server collects the tabs' results; a report that fails to send is not the export's problem.
-            const report = (result: { format: 'png' | 'svg'; data: string } | { error: string }) =>
-              postJson('/api/export/image/result', { requestId, ...result }).catch(() => {})
-            try {
-              if (!canSyncScene()) throw new Error('Scene is not fully loaded; export is paused')
-              // Same option surface as the headless renderer (renderer:'node'),
-              // so `--renderer browser` accepts identical flags.
-              const opts = data.options ?? {}
-              const embedScene = opts.embedScene === true
-              if (embedScene && data.format !== 'png') throw new Error('embedScene is only supported for PNG exports')
-              const hide = new Set<string>(opts.hide ?? []) // scratch work never goes into an export for an agent
-              const allElements = excalidrawAPI.getSceneElements().filter(el => !hide.has(el.id))
-              const wanted = opts.elementIds ? new Set(opts.elementIds) : null
-              const elements = wanted
-                ? allElements.filter(
-                    el => wanted.has(el.id) || (el.type === 'text' && el.containerId && wanted.has(el.containerId)),
-                  )
-                : allElements
-              const isFrame = (el: NonDeleted<ExcalidrawElement>): el is NonDeleted<ExcalidrawFrameLikeElement> =>
-                el.type === 'frame' || el.type === 'magicframe'
-              const exportingFrame: ExcalidrawFrameLikeElement | null = opts.frameId
-                ? ((allElements.find(el => el.id === opts.frameId && isFrame(el)) as
-                    | NonDeleted<ExcalidrawFrameLikeElement>
-                    | undefined) ?? null)
-                : opts.area // Local patch: a marked area crops like a frame that is not in the scene.
-                  ? ({
-                      id: '__area',
-                      type: 'frame',
-                      x: opts.area.x,
-                      y: opts.area.y,
-                      width: opts.area.w,
-                      height: opts.area.h,
-                      angle: 0,
-                      name: null,
-                      groupIds: [],
-                      frameId: null,
-                      isDeleted: false,
-                    } as unknown as ExcalidrawFrameLikeElement)
-                  : null
-              if (opts.frameId && !exportingFrame) throw new Error(`Unknown frame id: ${opts.frameId}`)
-              let exportElements =
-                embedScene && exportingFrame
-                  ? elementsOverlappingBBox({ elements, bounds: exportingFrame, type: 'overlap' }).filter(
-                      (el: ExcalidrawElement) => !el.frameId || el.frameId === exportingFrame.id,
-                    )
-                  : elements
-              if (embedScene) {
-                const exportedIds = new Set(exportElements.map((el: ExcalidrawElement) => el.id))
-                exportElements = exportElements.map((el: ExcalidrawElement) =>
-                  el.frameId && !exportedIds.has(el.frameId) ? { ...el, frameId: null } : el,
-                )
-              }
-              const appState = excalidrawAPI.getAppState()
-              const exportAppState = {
-                ...appState,
-                exportBackground: data.background !== false,
-                exportEmbedScene: embedScene,
-                ...(opts.dark !== undefined ? { exportWithDarkMode: opts.dark } : {}),
-                exportScale: opts.scale ?? 1,
-              }
-              const files = excalidrawAPI.getFiles()
-
-              if (data.format === 'svg') {
-                const svg = await exportToSvg({
-                  elements,
-                  appState: exportAppState,
-                  files,
-                  exportPadding: opts.padding,
-                  exportingFrame,
-                })
-                await report({ format: 'svg', data: new XMLSerializer().serializeToString(svg) })
-              } else {
-                const blob = await exportToBlob({
-                  elements: exportElements,
-                  appState: exportAppState,
-                  files,
-                  mimeType: 'image/png',
-                  exportPadding: opts.padding,
-                  exportingFrame,
-                })
-                const reader = new FileReader()
-                reader.onload = async () => {
-                  try {
-                    const resultString = reader.result as string
-                    const base64 = resultString?.split(',')[1]
-                    if (!base64) {
-                      throw new Error('Could not extract base64 data from result')
-                    }
-                    await report({ format: 'png', data: base64 })
-                  } catch (readerError) {
-                    console.error('Image export (FileReader) failed:', readerError)
-                    await report({ error: (readerError as Error).message })
-                  }
-                }
-                reader.onerror = async () => {
-                  console.error('FileReader error:', reader.error)
-                  await report({ error: reader.error?.message || 'FileReader failed' })
-                }
-                reader.readAsDataURL(blob)
-              }
-            } catch (exportError) {
-              console.error('Image export failed:', exportError)
-              await report({ error: (exportError as Error).message })
-            }
-          }
+          if (data.requestId)
+            await exportForServer(excalidrawAPI, { ...data, requestId: data.requestId }, canSyncScene())
           break
 
         case 'set_viewport':
           console.log('Received viewport control request', data)
-          if (data.requestId) {
-            try {
-              if (data.scrollToContent) {
-                const allElements = excalidrawAPI.getSceneElements()
-                if (allElements.length > 0) {
-                  excalidrawAPI.scrollToContent(allElements, {
-                    fitToViewport: true,
-                    viewportZoomFactor: data.viewportZoomFactor,
-                    animate: true,
-                  })
-                }
-              } else if (data.scrollToElementIds !== undefined) {
-                if (
-                  !Array.isArray(data.scrollToElementIds) ||
-                  data.scrollToElementIds.length === 0 ||
-                  !data.scrollToElementIds.every(id => typeof id === 'string' && id.length > 0)
-                ) {
-                  throw new Error('scrollToElementIds must be a non-empty array of element IDs')
-                }
-                const allElements = excalidrawAPI.getSceneElements()
-                const requestedIds = new Set(data.scrollToElementIds)
-                const targetElements = allElements.filter(el => requestedIds.has(el.id))
-                const foundIds = new Set(targetElements.map(el => el.id))
-                const missingIds = data.scrollToElementIds.filter(id => !foundIds.has(id))
-                if (missingIds.length > 0) {
-                  throw new Error(`Elements not found for IDs: ${missingIds.join(', ')}`)
-                }
-                excalidrawAPI.scrollToContent(targetElements, {
-                  fitToViewport: true,
-                  viewportZoomFactor: data.viewportZoomFactor,
-                  animate: true,
-                })
-              } else if (data.scrollToElementId) {
-                const allElements = excalidrawAPI.getSceneElements()
-                const targetElement = allElements.find(el => el.id === data.scrollToElementId)
-                if (targetElement) {
-                  excalidrawAPI.scrollToContent([targetElement], { fitToViewport: false, animate: true })
-                } else {
-                  throw new Error(`Element ${data.scrollToElementId} not found`)
-                }
-              } else {
-                // Direct zoom/scroll control. Only the keys given change: updateScene merges them,
-                // though its type asks for every key of the pick.
-                const appState = {
-                  ...(data.zoom !== undefined ? { zoom: { value: data.zoom as AppState['zoom']['value'] } } : {}),
-                  ...(data.offsetX !== undefined ? { scrollX: data.offsetX } : {}),
-                  ...(data.offsetY !== undefined ? { scrollY: data.offsetY } : {}),
-                } as Pick<AppState, 'zoom' | 'scrollX' | 'scrollY'>
-                if (Object.keys(appState).length > 0) {
-                  applySceneUpdateWithoutAutoSync(excalidrawAPI, { appState })
-                }
-              }
-
-              await post('/api/viewport/result', {
-                requestId: data.requestId,
-                success: true,
-                message: 'Viewport updated',
-              })
-            } catch (viewportError) {
-              console.error('Viewport control failed:', viewportError)
-              await post('/api/viewport/result', {
-                requestId: data.requestId,
-                error: (viewportError as Error).message,
-              }).catch(() => {})
-            }
-          }
+          if (data.requestId)
+            await applyViewport(excalidrawAPI, { ...data, requestId: data.requestId }, appState =>
+              applySceneUpdateWithoutAutoSync(excalidrawAPI, { appState }),
+            )
           break
 
         case 'mermaid_convert':
