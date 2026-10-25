@@ -18,6 +18,7 @@ import {
 import { dirname, join, resolve } from 'node:path'
 import type { ExcalidrawFile, ServerElement, Snapshot } from '../types.js'
 import { elements, files, snapshots } from '../types.js'
+import { fillMissingIndices } from './order-keys.js'
 
 const STATE_SCHEMA_VERSION = 1 as const
 const STATE_FILE_NAME = 'canvas-state-v1.json'
@@ -856,7 +857,11 @@ function requireInitializedState(): void {
 
 export function commitCanvasMutation<T>(mutate: () => T): T {
   const statePath = durableStatePath()
-  if (!statePath) return mutate()
+  if (!statePath) {
+    const value = mutate()
+    fillMissingIndices()
+    return value
+  }
 
   if (persistenceUnavailable) {
     throw new CanvasPersistenceError(new Error('Canvas persistence requires a restart after a publication failure'))
@@ -868,6 +873,7 @@ export function commitCanvasMutation<T>(mutate: () => T): T {
   let value: T
   try {
     value = mutate()
+    fillMissingIndices()
   } catch (error) {
     restoreRuntimeState(backup)
     throw error
@@ -992,6 +998,7 @@ export function loadDurableState(): DurableStateStatus {
   const restoredSnapshots = new Map(state.snapshots.map(snapshot => [snapshot.name, snapshot]))
 
   replaceMap(elements, restoredElements)
+  fillMissingIndices()
   replaceMap(files, restoredFiles)
   replaceMap(snapshots, restoredSnapshots)
   initializedAuthority = dataDirectory

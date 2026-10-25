@@ -354,6 +354,11 @@ export const assertScenePreserved = (
   }
 }
 
+const byIndex = <T extends { index?: unknown }>(list: readonly T[]): T[] =>
+  [...list].sort((a, b) =>
+    typeof a.index === 'string' && typeof b.index === 'string' && a.index !== b.index ? (a.index < b.index ? -1 : 1) : 0,
+  )
+
 export const prepareServerScene = (
   elements: readonly Partial<ExcalidrawElement>[],
   opts: {
@@ -417,7 +422,10 @@ export const prepareServerScene = (
 
   // Preserve the original stacking order, including interleaved frames, images
   // and freehand strokes. Newly expanded labels sit beside their container.
-  const ordered = validated.flatMap(element => {
+  // `index` is the z-order, not the array: a frame child sits below its frame
+  // even when it came later. Excalidraw re-keys an element whose key breaks the
+  // array order, and inserts a new stroke at its frame's array slot.
+  const ordered = byIndex(validated).flatMap(element => {
     const id = element.id ?? ''
     const next = isFrame(element)
       ? element
