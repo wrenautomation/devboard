@@ -349,22 +349,6 @@ export interface ExcalidrawFile {
 }
 export const files = new Map<string, ExcalidrawFile>()
 
-// Validation function for Excalidraw elements
-export function validateElement(element: Partial<ServerElement>): element is ServerElement {
-  const requiredFields: (keyof ServerElement)[] = ['type', 'x', 'y']
-  const hasRequiredFields = requiredFields.every(field => field in element)
-
-  if (!hasRequiredFields) {
-    throw new Error(`Missing required fields: ${requiredFields.join(', ')}`)
-  }
-
-  if (!Object.values(EXCALIDRAW_ELEMENT_TYPES).includes(element.type as ExcalidrawElementType)) {
-    throw new Error(`Invalid element type: ${element.type}`)
-  }
-
-  return true
-}
-
 // Helper function to generate unique IDs
 export function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substring(2)

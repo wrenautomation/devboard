@@ -270,20 +270,6 @@ export async function sendMermaid(mermaidDiagram: string, config?: Record<string
   })
 }
 
-// ---- Strict CRUD variants (throw on failure) ----
-// syncToCanvas deliberately swallows errors so MCP tools degrade gracefully;
-// the CLI wants hard failures with real error messages instead.
-
-export async function createElementStrict(element: ServerElement): Promise<ServerElement> {
-  const data = await requestJson<ApiResponse>('/api/elements', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(element),
-  })
-  if (!data.element) throw new Error('The canvas returned no element')
-  return data.element
-}
-
 export async function updateElementStrict(element: Partial<ServerElement> & { id: string }): Promise<ServerElement> {
   const data = await requestJson<ApiResponse>(`/api/elements/${element.id}`, {
     method: 'PUT',

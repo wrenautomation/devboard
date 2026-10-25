@@ -921,14 +921,6 @@ export function switchDurableDirectory(directory: string): DurableStateStatus {
   }
 }
 
-// Local patch: rename the open data directory (project rename). The lock is path-based, so drop it,
-// move the folder, then take it again at the new path.
-export function renameDurableDirectory(directory: string): DurableStateStatus {
-  const current = durableStateDirectory()
-  if (!current) throw new Error('Canvas persistence is off')
-  return moveDurableDirectory(current, directory, directory)
-}
-
 // Local patch: move `from` (the open data directory or a folder above it) to `to`; the open
 // directory ends up at `opened`.
 export function moveDurableDirectory(from: string, to: string, opened: string): DurableStateStatus {
