@@ -122,38 +122,6 @@ export function fontFilePath(entry: FontEntry): string {
   return path.join(FONTS_DIR, entry.file)
 }
 
-// Excalidraw: lineHeight is a unitless multiplier of fontSize.
-export function getLineHeightInPx(fontSize: number, lineHeight: number): number {
-  return fontSize * lineHeight
-}
-
-// Distance from the top of a line box to its alphabetic baseline — the `y`
-// Excalidraw gives each <text> line. Ported from Excalidraw's Fonts.ts.
-export function getVerticalOffset(
-  fontFamily: number | string | undefined,
-  fontSize: number,
-  lineHeightPx: number,
-): number {
-  const { unitsPerEm, ascender, descender } = getFontEntry(fontFamily).metrics
-  const fontSizeEm = fontSize / unitsPerEm
-  const lineGap = (lineHeightPx - fontSizeEm * ascender + fontSizeEm * descender) / 2
-  return fontSizeEm * ascender + lineGap
-}
-
-// Collect the families a scene's text uses so we only load/embed those fonts.
-export function collectFontEntries(
-  elements: ReadonlyArray<{ type?: string; fontFamily?: number | string }>,
-): FontEntry[] {
-  const seen = new Map<number, FontEntry>()
-  for (const el of elements) {
-    if (el.type !== 'text') continue
-    const entry = getFontEntry(el.fontFamily)
-    seen.set(entry.id, entry)
-  }
-  if (seen.size === 0) seen.set(DEFAULT_FONT_FAMILY, DEFAULT_FONT)
-  return [...seen.values()]
-}
-
 // Unique TTF paths for resvg's `font.fontFiles`.
 export function fontFilesFor(entries: FontEntry[]): string[] {
   return [...new Set(entries.map(fontFilePath))]
