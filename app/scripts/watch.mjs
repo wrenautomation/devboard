@@ -85,6 +85,14 @@ setInterval(() => {
 let last = args.includes('--all') ? 0 : saved || Date.now()
 
 const show = n => {
+  // A note from a page (Storybook's Agentation): its text holds the marks; the link opens the page.
+  if (n.link) {
+    console.log(`[page note ${n.id}]${n.to ? ` to @${n.to}` : ''} on ${n.link}:\n${n.text || '(no text)'}`)
+    last = n.id
+    fs.writeFileSync(lastFile, `${last}\n`)
+    if (once) setTimeout(() => process.exit(0), 300)
+    return
+  }
   const what = n.area ? 'marked area' : n.ids.length ? `${n.ids.length} shape(s)` : 'no shapes'
   const box = n.box ? ` at x${n.box.x} y${n.box.y} ${n.box.w}x${n.box.h}` : ''
   const look = n.area

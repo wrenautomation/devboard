@@ -22,6 +22,8 @@ type Note = {
   box?: { x: number; y: number; w: number; h: number }
   area?: true
   enter?: true
+  // A note from a page on this Mac (Storybook's Agentation Send): the page it is about.
+  link?: string
 }
 
 const NOTES_FILE =
@@ -124,7 +126,7 @@ export function mountNotes(app: Express): void {
   app.post('/api/notify', (req: Request, res: Response) => {
     const text = String(req.body?.text ?? '')
       .trim()
-      .slice(0, 4000)
+      .slice(0, 12000) // an Agentation Send carries selectors for each mark
     const hidden = scratchHidden() // a note never points Claude at scratch work
     const ids = Array.isArray(req.body?.ids)
       ? req.body.ids
@@ -140,6 +142,8 @@ export function mountNotes(app: Express): void {
     // area: the box is a marked area, not the bounds of the selected shapes.
     const area = req.body?.area === true && box && box.w > 0 && box.h > 0
     if (!text && !ids.length && !area) return fail(res, 400, 'note needs text, selected shapes or a marked area')
+    const link = String(req.body?.link ?? '')
+    const local = link.length <= 500 && /^http:\/\/(localhost|127\.0\.0\.1):\d+\//.test(link)
     const to = WATCHER_NAME.test(String(req.body?.to ?? '')) ? String(req.body.to) : ''
     // enter: also press Enter in the terminal of that one session, so a message typed there goes in too.
     const shell = req.body?.enter === true && to ? liveSessions().find(x => x.watch === to)?.shell : undefined
@@ -153,6 +157,7 @@ export function mountNotes(app: Express): void {
       ...(box ? { box } : {}),
       ...(area ? { area: true as const } : {}),
       ...(shell ? { enter: true as const } : {}),
+      ...(local ? { link } : {}),
     }
     notes.push(note)
     if (notes.length > 200) notes.splice(0, notes.length - 200)
