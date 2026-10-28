@@ -199,9 +199,6 @@ button:disabled, .nt-send:disabled { cursor: default; opacity: .45; transform: n
 
 /* Icon panel */
 .canvas-container { position: relative; }
-/* The hand tool sits right after the pen (Draw). Same flex row, so order moves it. */
-.App-toolbar label:has([data-testid="toolbar-hand"]) { order: 1; }
-.App-toolbar label:has([data-testid="toolbar-freedraw"]) ~ * { order: 2; }
 .icon-ghost { position: fixed; z-index: 50; width: 72px; height: 72px; pointer-events: none; opacity: .9; transform: translate(-50%, -50%);
   background: var(--paper); box-shadow: 0 0 0 2px var(--accent), var(--lift); border-radius: var(--leaf-c); padding: 6px; }
 .icon-ghost svg { width: 100%; height: 100%; }
@@ -240,3 +237,12 @@ button:disabled, .nt-send:disabled { cursor: default; opacity: .45; transform: n
 .sel-delete { position: fixed; z-index: 15; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border: none; border-radius: var(--leaf-c);
   background: var(--paper); color: var(--bad); box-shadow: inset 0 0 0 1px var(--hair), 0 2px 0 var(--hair), var(--lift); touch-action: manipulation; }
 .sel-delete:active { transform: translateY(2px); background: var(--bad); color: #fff; }
+
+/* Local patch: select, hand and pen side by side, first after the lock. Same grid row, so order moves them. */
+.App-toolbar .Stack_horizontal > * { order: 5; }
+/* Excalidraw puts its pen-mode toggle first once it sees a Pencil; it and the lock keep the front. */
+.App-toolbar .Stack_horizontal > :first-child, .App-toolbar .Stack_horizontal > :has([data-testid="toolbar-lock"]) { order: 0; }
+.App-toolbar .Stack_horizontal > :has([data-testid="toolbar-lock"]) + .App-toolbar__divider { order: 1; }
+.App-toolbar .Stack_horizontal > :has([data-testid="toolbar-selection"]) { order: 2; }
+.App-toolbar .Stack_horizontal > :has([data-testid="toolbar-hand"]) { order: 3; }
+.App-toolbar .Stack_horizontal > :has([data-testid="toolbar-freedraw"]) { order: 4; }

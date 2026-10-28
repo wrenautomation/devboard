@@ -20,6 +20,7 @@ import { Projects } from './Projects'
 import { Scratch, withoutScratch } from './Scratch'
 import { SelectionDelete } from './SelectionDelete'
 import { StrokeWidth } from './StrokeWidth'
+import { Touch } from './Touch'
 import {
   asFileMap,
   dropReplica,
@@ -1045,6 +1046,7 @@ function App(): JSX.Element {
       {/* Canvas Container */}
       <div className="canvas-container">
         <StrokeWidth api={excalidrawAPI as ExcalidrawImperativeAPI | null} />
+        <Touch api={excalidrawAPI as ExcalidrawImperativeAPI | null} />
         <div
           onPointerDownCapture={() => {
             userInteractedRef.current = true
