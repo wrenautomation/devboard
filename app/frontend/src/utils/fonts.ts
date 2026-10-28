@@ -11,6 +11,9 @@ const LATIN = Array.from({ length: 95 }, (_, i) => String.fromCharCode(32 + i)).
 // exporter loads the fonts its elements use through Excalidraw's own loader,
 // so a tiny off-screen export of every family loads them up front.
 let preload: Promise<void> | null = null
+let loaded = false
+// true once the preload finished, not timed out: text measured now gets the real font
+export const canvasFontsLoaded = (): boolean => loaded
 
 export const preloadCanvasFonts = (timeoutMs = 4000): Promise<void> => {
   preload ??= Promise.race([
@@ -26,7 +29,12 @@ export const preloadCanvasFonts = (timeoutMs = 4000): Promise<void> => {
       ),
       appState: {},
       files: null,
-    }).then(() => undefined),
+    })
+      // WebKit: the export can resolve before canvas text may use the face; measures then fall back to serif
+      .then(() => Promise.all(Object.keys(FONT_FAMILY).map(name => document.fonts?.load(`20px "${name}"`, LATIN))))
+      .then(() => {
+        loaded = true
+      }),
     // An unreachable CDN must not hold the scene back
     new Promise<void>(resolve => setTimeout(resolve, timeoutMs)),
   ]).catch(error => {

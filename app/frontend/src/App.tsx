@@ -20,7 +20,6 @@ import { Projects } from './Projects'
 import { Scratch, withoutScratch } from './Scratch'
 import { SelectionDelete } from './SelectionDelete'
 import { StrokeWidth } from './StrokeWidth'
-import { Touch } from './Touch'
 import {
   asFileMap,
   dropReplica,
@@ -35,7 +34,8 @@ import {
   writeFile,
   writeReplica,
 } from './store'
-import { preloadCanvasFonts } from './utils/fonts'
+import { Touch } from './Touch'
+import { canvasFontsLoaded, preloadCanvasFonts } from './utils/fonts'
 import { convertMermaidToExcalidraw, DEFAULT_MERMAID_CONFIG } from './utils/mermaidConverter'
 import type { ServerElement } from './utils/scene'
 import { assertScenePreserved, cleanElementForExcalidraw, prepareServerScene } from './utils/scene'
@@ -356,7 +356,8 @@ function App(): JSX.Element {
     const acked = same ? ackedRef.current : new Map(Object.entries(replica?.acked ?? {}))
     const base: readonly ExcalidrawElement[] = same ? api.getSceneElementsIncludingDeleted() : (replica?.elements ?? [])
     const local = base.filter(el => acked.get(el.id) !== stamp(el))
-    const prepared = prepareServerScene(incoming)
+    // stored sizes come from other font metrics (server, another browser): re-measure with this tab's fonts
+    const prepared = prepareServerScene(incoming, { refreshDimensions: canvasFontsLoaded() })
     // reconcileElements wants fractional indexes and a brand on the remote side; both sides are full elements here.
     const merged: readonly ExcalidrawElement[] = local.length
       ? reconcileElements(
