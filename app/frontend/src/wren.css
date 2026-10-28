@@ -279,3 +279,11 @@ button:disabled, .nt-send:disabled { cursor: default; opacity: .45; transform: n
 .App-toolbar .Stack_horizontal > :has([data-testid="toolbar-selection"]) { order: 2; }
 .App-toolbar .Stack_horizontal > :has([data-testid="toolbar-hand"]) { order: 3; }
 .App-toolbar .Stack_horizontal > :has([data-testid="toolbar-freedraw"]) { order: 4; }
+
+/* A folder card reads as a folder: a tab on its top edge, an accent rim, a solid badge, an icon by its name. */
+.pj-folder { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent) 45%, transparent), var(--raise); }
+.pj-folder::before { content: ""; position: absolute; top: -9px; left: 14px; width: 64px; height: 12px; border-radius: 8px 8px 0 0; background: color-mix(in srgb, var(--accent) 45%, var(--paper)); pointer-events: none; }
+.pj-folder .pj-art { background: var(--tint); }
+.pj-badge { width: 32px; height: 32px; background: var(--accent); color: #fff; }
+.pj-kind { flex: none; margin-right: 6px; vertical-align: -2px; color: var(--accent); }
+.pj-row-hit .lucide-folder, .pj-kind { fill: color-mix(in srgb, var(--accent) 25%, transparent); }

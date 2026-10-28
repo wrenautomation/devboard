@@ -19,18 +19,7 @@ import {
 import { snapCenterToCursor } from '@dnd-kit/modifiers'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getJson, postJson } from './api'
-import {
-  ChevronDown,
-  ChevronRight,
-  Folder,
-  FolderPlus,
-  LayoutDashboard,
-  MoreHorizontal,
-  Plus,
-  Search,
-  Star,
-  X,
-} from './icons'
+import { ChevronDown, ChevronRight, FileIcon, Folder, FolderPlus, MoreHorizontal, Plus, Search, Star, X } from './icons'
 
 type Board = { path: string; updated: number; thumb: boolean }
 type State = { current: string; boards: Board[]; folders: string[]; starred?: string[] }
@@ -134,7 +123,7 @@ function FolderArt({ c, f }: { c: Ctx; f: string }) {
         <img key={b.path} src={thumbUrl(b, bust(c, b))} alt="" loading="lazy" draggable={false} />
       ))}
       <span className="pj-badge">
-        <Folder size={14} />
+        <Folder size={16} fill="currentColor" />
       </span>
     </div>
   )
@@ -166,11 +155,14 @@ function Card({ c, path }: { c: Ctx; path: string }) {
           ) : board.thumb ? (
             <img src={thumbUrl(board, bust(c, board))} alt="" loading="lazy" draggable={false} />
           ) : (
-            <LayoutDashboard size={40} strokeWidth={1.4} />
+            <FileIcon size={40} strokeWidth={1.4} />
           )}
         </div>
         <div className="pj-meta">
-          <b>{c.fullNames ? path : base(path)}</b>
+          <b>
+            {!board && <Folder size={15} className="pj-kind" />}
+            {c.fullNames ? path : base(path)}
+          </b>
           <span>{board ? (on ? 'Open now' : ago(board.updated)) : n === 1 ? '1 board' : `${n} boards`}</span>
         </div>
       </button>
@@ -256,7 +248,7 @@ function TreeBoard({ c, path, depth }: { c: Ctx; path: string; depth: number }) 
         aria-current={path === c.state.current ? 'true' : undefined}
         onClick={c.tap(() => c.openBoard(path))}
       >
-        <LayoutDashboard size={16} /> <span>{base(path)}</span>
+        <FileIcon size={16} /> <span>{base(path)}</span>
         {c.starred.has(path) && <Star size={12} fill="currentColor" className="pj-star-icon" />}
       </button>
     </div>
@@ -579,7 +571,7 @@ export function Projects({
                       aria-current={!starredView && !query && dir === '' ? 'page' : undefined}
                       onClick={() => goto('')}
                     >
-                      <LayoutDashboard size={16} /> <span>All boards</span>
+                      <FileIcon size={16} /> <span>All boards</span>
                     </button>
                   </DropCrumb>
                   {state.folders
@@ -654,7 +646,7 @@ export function Projects({
               <DragOverlay dropAnimation={null} modifiers={[snapCenterToCursor]}>
                 {moving && (
                   <div className="pj-ghost">
-                    {isBoard(moving) ? <LayoutDashboard size={16} /> : <Folder size={16} />}
+                    {isBoard(moving) ? <FileIcon size={16} /> : <Folder size={16} />}
                     {base(moving)}
                   </div>
                 )}
