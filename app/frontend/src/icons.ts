@@ -14,5 +14,6 @@ export {
   Search,
   Send,
   Shapes,
+  Star,
   X,
 } from 'lucide-react'

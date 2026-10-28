@@ -229,6 +229,39 @@ button:disabled, .nt-send:disabled { cursor: default; opacity: .45; transform: n
   .header .hb-word { display: none; }
 }
 .pj-hit { display: grid; grid-template-rows: auto auto; padding: 0; border: 0; background: none; color: inherit; text-align: left; border-radius: var(--leaf); cursor: pointer; }
+/* Projects: file tree beside the cards; stars; folder mosaic; hold-to-drag. */
+.pj-body { display: grid; grid-template-columns: 224px minmax(0, 1fr); gap: 20px; align-items: start; }
+.pj-tree { position: sticky; top: 0; display: grid; gap: 1px; max-height: calc(100dvh - 150px); overflow: auto; padding-right: 10px; border-right: 1px solid var(--hair); }
+.pj-main { display: grid; gap: 14px; align-content: start; min-width: 0; }
+.pj-row { display: flex; align-items: center; border-radius: 4px 10px 4px 10px; }
+.pj-twist { flex: none; width: 24px; height: 36px; display: grid; place-items: center; padding: 0; border: 0; background: none; color: var(--ink-3); }
+.pj-row-hit { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 6px 8px; border: 0; border-radius: 4px 10px 4px 10px;
+  background: none; color: var(--ink); text-align: left; font-size: 14.5px; font-weight: 550; }
+.pj-row-hit svg { flex: none; color: var(--accent); }
+.pj-row-hit span { overflow-wrap: anywhere; }
+.pj-row-hit:hover { background: var(--wash); }
+.pj-row-hit[aria-current] { background: var(--tint); font-weight: 650; }
+.pj-row-top { width: 100%; }
+.pj-tree > .pj-row-top:first-child { margin-bottom: 2px; }
+.pj-star-icon, .pj-row-hit .pj-star-icon { color: var(--warn); }
+.pj-star { position: absolute; top: 8px; left: 8px; z-index: 2; width: 36px; height: 36px; display: grid; place-items: center; border: 0; border-radius: var(--leaf-p);
+  background: color-mix(in srgb, var(--paper) 88%, transparent); color: var(--ink-3); box-shadow: var(--raise); transition: transform .3s var(--spring), color .15s; }
+.pj-star:hover { color: var(--ink); }
+.pj-star:active { transform: scale(.88); }
+.pj-star.on { color: var(--warn); }
+.pj-card, .pj-row { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; touch-action: manipulation; }
+.pj-moving { opacity: .35; }
+.pj-card.pj-drop, .pj-row.pj-drop, .pj-drop > button { box-shadow: 0 0 0 2px var(--accent); background: var(--tint); }
+.pj-ghost { display: inline-flex; align-items: center; gap: 8px; width: max-content; padding: 10px 14px; border-radius: var(--leaf-c); background: var(--paper);
+  box-shadow: var(--lift), 0 0 0 2px var(--accent); color: var(--ink); font-size: 15px; font-weight: 650; pointer-events: none; }
+.pj-ghost svg { color: var(--accent); }
+.pj-mosaic { position: absolute; inset: 0; display: grid; grid-template: 1fr 1fr / 1fr 1fr; gap: 3px; padding: 6px; background: var(--wash); }
+.pj-mosaic.n1 { grid-template: 1fr / 1fr; }
+.pj-mosaic.n2 { grid-template: 1fr / 1fr 1fr; }
+.pj-mosaic.n3 img:first-child { grid-row: span 2; }
+.pj-art .pj-mosaic img { position: static; width: 100%; height: 100%; min-height: 0; padding: 4px; border-radius: 4px; object-fit: contain; background: #fff; }
+.pj-badge { position: absolute; right: 8px; bottom: 8px; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 8px; background: var(--paper); color: var(--accent); box-shadow: var(--raise); }
+@media (max-width: 720px) { .pj-body { grid-template-columns: 1fr; } .pj-tree { display: none; } }
 
 /* Excalidraw's own Library is muted: the Icons panel replaces it. */
 .default-sidebar-trigger { display: none !important; }

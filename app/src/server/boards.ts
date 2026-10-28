@@ -17,8 +17,10 @@ export const currentFile = (): string => {
   return CURRENT_FILE
 }
 export const BOARD_PATH = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,47}(\/[A-Za-z0-9][A-Za-z0-9 _-]{0,47}){0,4}$/
+// STAR_FILE: an empty marker; it moves, renames and goes to the trash with its board or folder.
 export const STATE_FILE = 'canvas-state-v1.json',
-  THUMB_FILE = 'thumb.png'
+  THUMB_FILE = 'thumb.png',
+  STAR_FILE = '.star'
 export const boardPath = (v: unknown): string | null => {
   const p = String(v ?? '')
     .split('/')
@@ -41,11 +43,13 @@ export const within = (p: string, root: string) => p === root || p.startsWith(`$
 // Every board and folder under PROJECTS_DIR. Boards hold no folders.
 export function walkProjects() {
   const boards: { path: string; updated: number; thumb: boolean }[] = [],
-    folders: string[] = []
+    folders: string[] = [],
+    starred: string[] = []
   const walk = (rel: string, depth: number) => {
     for (const d of projectFs.readdirSync(rel ? projectDir(rel) : projectsRoot(), { withFileTypes: true })) {
       const p = rel ? `${rel}/${d.name}` : d.name
       if (!d.isDirectory() || !boardPath(p) || boardPath(p) !== p) continue
+      if (projectFs.existsSync(path.join(projectDir(p), STAR_FILE))) starred.push(p)
       if (isBoard(p)) {
         const st = (f: string) => {
           try {
@@ -62,7 +66,11 @@ export function walkProjects() {
     }
   }
   walk('', 0)
-  return { boards: boards.sort((a, b) => a.path.localeCompare(b.path)), folders: folders.sort() }
+  return {
+    boards: boards.sort((a, b) => a.path.localeCompare(b.path)),
+    folders: folders.sort(),
+    starred: starred.sort(),
+  }
 }
 // A board or folder may not sit inside a board.
 export const parentIsBoard = (p: string) =>

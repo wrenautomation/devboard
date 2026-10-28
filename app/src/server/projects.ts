@@ -14,6 +14,7 @@ import {
   parentIsBoard,
   projectDir,
   projectsRoot,
+  STAR_FILE,
   THUMB_FILE,
   walkProjects,
   within,
@@ -73,8 +74,25 @@ const moveProject = (req: Request, res: Response) => {
 export function mountProjects(app: Express): void {
   app.get('/api/projects', (_req: Request, res: Response) => {
     if (projectsOff(res)) return
-    const { boards, folders } = walkProjects()
-    res.json({ success: true, current: currentProject(), projects: boards.map(b => b.path), boards, folders })
+    const { boards, folders, starred } = walkProjects()
+    res.json({ success: true, current: currentProject(), projects: boards.map(b => b.path), boards, folders, starred })
+  })
+
+  // Star or unstar a board or folder: { path, on }.
+  app.post('/api/projects/star', (req: Request, res: Response) => {
+    if (projectsOff(res)) return
+    const name = boardPath(req.body?.path)
+    if (!name || !projectFs.existsSync(projectDir(name))) return fail(res, 404, `no project ${name}`)
+    const file = path.join(projectDir(name), STAR_FILE)
+    try {
+      if (req.body?.on) projectFs.writeFileSync(file, '')
+      else projectFs.rmSync(file, { force: true })
+    } catch (error) {
+      logger.error(`Could not star project "${name}"`, error)
+      return fail(res, 500, (error as Error).message)
+    }
+    broadcast({ type: 'projects_changed' })
+    res.json({ success: true, path: name, on: Boolean(req.body?.on) })
   })
 
   app.post('/api/projects/open', (req: Request, res: Response) => {
