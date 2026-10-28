@@ -210,26 +210,26 @@ export function Notify({ api, flush }: { api: ExcalidrawImperativeAPI | null; fl
                 {listening} session{listening === 1 ? '' : 's'}
               </span>
             </button>
-            {sessions.map(x => (
-              // biome-ignore lint/a11y/useSemanticElements: same
-              <button
-                key={x.watch}
-                type="button"
-                role="radio"
-                aria-checked={to === x.watch}
-                className={to === x.watch ? 'on' : ''}
-                disabled={!x.listening}
-                onClick={() => setTo(x.watch)}
-              >
-                <b>{x.name}</b>
-                <span>
-                  {x.folder}
-                  {x.status === 'busy' ? ' · busy' : ''}
-                  {x.terminal ? ' · VS Code' : ''}
-                  {x.listening ? '' : ' · not listening'}
-                </span>
-              </button>
-            ))}
+            {sessions
+              .filter(x => x.listening)
+              .map(x => (
+                // biome-ignore lint/a11y/useSemanticElements: same
+                <button
+                  key={x.watch}
+                  type="button"
+                  role="radio"
+                  aria-checked={to === x.watch}
+                  className={to === x.watch ? 'on' : ''}
+                  onClick={() => setTo(x.watch)}
+                >
+                  <b>{x.name}</b>
+                  <span>
+                    {x.folder}
+                    {x.status === 'busy' ? ' · busy' : ''}
+                    {x.terminal ? ' · VS Code' : ''}
+                  </span>
+                </button>
+              ))}
             {others.map(w => (
               // biome-ignore lint/a11y/useSemanticElements: same
               <button

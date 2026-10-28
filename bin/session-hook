@@ -1,7 +1,31 @@
 #!/usr/bin/env bash
 # Claude Code SessionStart hook (install.sh adds it to ~/.claude/settings.json): tells each session to listen
 # for canvas notes under its own name, cc-<first 8 of its id>. The canvas "To" picker lists sessions by that name.
-id="$(python3 -c 'import json,sys;print(json.load(sys.stdin).get("session_id",""))' 2>/dev/null | tr -cd 'a-f0-9' | cut -c1-8)"
+# Only a session William types in: a headless run (claude -p, the SDK) is no one to send a note to.
+id="$(python3 -c '
+import glob, json, os, sys
+sid = json.load(sys.stdin).get("session_id", "")
+for f in glob.glob(os.path.expanduser("~/.claude/sessions/*.json")):
+    try:
+        d = json.load(open(f))
+    except Exception:
+        continue
+    if d.get("sessionId") == sid and d.get("kind", "interactive") != "interactive":
+        sys.exit()
+# The nearest claude process up the tree: a -p or --print there is a headless run.
+import subprocess
+pid = os.getppid()
+for _ in range(6):
+    out = subprocess.run(["ps", "-o", "ppid=,args=", "-p", str(pid)], capture_output=True, text=True).stdout.split()
+    if len(out) < 2:
+        break
+    if "claude" in os.path.basename(out[1]) or any(os.path.basename(x) == "claude" for x in out[1:3]):
+        if "-p" in out or "--print" in out:
+            sys.exit()
+        break
+    pid = int(out[0])
+print(sid)
+' 2>/dev/null | tr -cd 'a-f0-9' | cut -c1-8)"
 [ -n "$id" ] || exit 0
 curl -sf -m 1 -o /dev/null http://127.0.0.1:3100/health || exit 0
 cat <<MSG
