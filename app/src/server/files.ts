@@ -2,7 +2,9 @@ import type { Express, Request, Response } from 'express'
 import { CanvasFileImmutabilityError, commitCanvasMutation, durableStatePath } from '../core/canvas-persistence.js'
 import logger from '../logger.js'
 import { type ExcalidrawFile, files } from '../types.js'
+import { boardPath } from './boards.js'
 import { fail, mutationErrorStatus } from './reply.js'
+import { boardFile } from './scene.js'
 import { broadcast } from './ws.js'
 
 function prepareFileWrites(fileList: unknown[]): ExcalidrawFile[] {
@@ -81,8 +83,9 @@ export function mountFiles(app: Express): void {
   })
 
   // Local patch: one image as raw bytes. An id never changes its bytes (see prepareFileWrites): cache forever.
+  // ?board= reads a closed board's image (preload).
   app.get('/api/files/:id', (req: Request, res: Response) => {
-    const file = files.get(req.params.id as string)
+    const file = boardFile(boardPath(req.query.board), req.params.id as string)
     if (!file) return fail(res, 404, 'no such file')
     const comma = file.dataURL.indexOf(',')
     const body = file.dataURL.slice(comma + 1)

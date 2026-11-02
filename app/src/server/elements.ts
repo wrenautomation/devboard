@@ -15,7 +15,7 @@ import {
   normalizeFontFamily,
   type ServerElement,
 } from '../types.js'
-import { CURRENT_FILE, currentProject, PROJECTS_DIR } from './boards.js'
+import { currentProject } from './boards.js'
 import { fail, mutationErrorStatus } from './reply.js'
 import { scratchBlock, scratchKept, visibleTo } from './scratch.js'
 import { broadcast } from './ws.js'
@@ -658,12 +658,7 @@ export function mountElements(app: Express): void {
       const body = req.body && typeof req.body === 'object' ? req.body : {}
       const { elements: frontendElements, timestamp } = body
 
-      // A save is an overwrite. A tab still showing another project must never write into this one.
-      const forProject = req.header('x-canvas-project')
-      if (PROJECTS_DIR && CURRENT_FILE && forProject && forProject !== currentProject()) {
-        logger.warn(`Refused sync for "${forProject}": open project is "${currentProject()}"`)
-        return res.status(409).json({ success: false, error: 'project_changed', current: currentProject() })
-      }
+      // A save is an overwrite: a tab still showing another board is refused by the board guard (server.ts).
 
       // Validate input data
       if (!Array.isArray(frontendElements)) {
@@ -740,10 +735,6 @@ export function mountElements(app: Express): void {
 
   app.post('/api/elements/push', (req: Request, res: Response) => {
     try {
-      const forProject = req.header('x-canvas-project')
-      if (PROJECTS_DIR && CURRENT_FILE && forProject && forProject !== currentProject()) {
-        return res.status(409).json({ success: false, error: 'project_changed', current: currentProject() })
-      }
       const incoming: unknown = req.body?.elements
       if (!Array.isArray(incoming) || !incoming.every(isPushedElement)) {
         return fail(res, 400, 'Expected elements with id and version')

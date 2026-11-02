@@ -18,6 +18,7 @@ import {
 import { dirname, join, resolve } from 'node:path'
 import type { ExcalidrawFile, ServerElement, Snapshot } from '../types.js'
 import { elements, files, snapshots } from '../types.js'
+import { compact } from './compact.js'
 import { fillMissingIndices } from './order-keys.js'
 
 const STATE_SCHEMA_VERSION = 1 as const
@@ -373,7 +374,7 @@ function currentDurableState(): DurableCanvasStateV1 {
     if (element.id !== key) {
       throw new Error(`Canvas elements map key does not match element id: ${key}`)
     }
-    return element
+    return compact(element)
   })
   validateElementArray(durableElements, 'Canvas runtime elements')
 
@@ -993,7 +994,7 @@ export function loadDurableState(): DurableStateStatus {
   }
 
   const state = parseDurableState(readFileSync(statePath, 'utf8'))
-  const restoredElements = new Map(state.elements.map(element => [element.id, element]))
+  const restoredElements = new Map(state.elements.map(element => [element.id, compact(element)]))
   const restoredFiles = new Map(state.files.map(record => [record.id, hydrateFile(record)]))
   const restoredSnapshots = new Map(state.snapshots.map(snapshot => [snapshot.name, snapshot]))
 

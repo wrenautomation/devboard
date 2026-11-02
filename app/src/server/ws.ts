@@ -1,5 +1,6 @@
 import type { Server } from 'node:http'
 import WebSocket, { WebSocketServer } from 'ws'
+import { compact } from '../core/compact.js'
 import logger from '../logger.js'
 import {
   elements,
@@ -17,11 +18,20 @@ export const clients = new Set<WebSocket>()
 export function sceneMessage(): InitialElementsMessage {
   return {
     type: 'initial_elements',
-    elements: Array.from(elements.values()),
+    elements: Array.from(elements.values(), compact),
     project: currentProject(),
     // ids only: a tab keeps each image (IndexedDB) and gets a missing one from /api/files/:id
     fileIds: [...files.keys()],
   }
+}
+
+// Tabs that pull their scene by delta (/api/projects/scene, ws ?scene=pull): no full scene on connect or switch
+const pulls = new WeakSet<WebSocket>()
+
+// The whole scene to every tab that does not pull it.
+export function broadcastScene(): void {
+  const data = JSON.stringify(sceneMessage())
+  for (const client of clients) if (!pulls.has(client) && client.readyState === WebSocket.OPEN) client.send(data)
 }
 
 // Broadcast to all connected clients
@@ -56,14 +66,16 @@ export function attachWebSockets(server: Server): void {
     }
   }, 25_000).unref()
 
-  wss.on('connection', (ws: WebSocket) => {
+  wss.on('connection', (ws: WebSocket, req) => {
     clients.add(ws)
+    const pull = new URL(req.url ?? '/', 'http://x').searchParams.get('scene') === 'pull'
+    if (pull) pulls.add(ws)
     ponged.set(ws, true)
     ws.on('pong', () => ponged.set(ws, true))
     logger.info('New WebSocket connection established')
 
-    // Send current elements to new client
-    ws.send(JSON.stringify(sceneMessage()))
+    // Send current elements to new client; a pulling tab asks for its delta itself
+    if (!pull) ws.send(JSON.stringify(sceneMessage()))
 
     // Send sync status to new client
     const syncMessage: SyncStatusMessage = {

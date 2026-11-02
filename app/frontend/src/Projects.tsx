@@ -256,10 +256,10 @@ function TreeBoard({ c, path, depth }: { c: Ctx; path: string; depth: number }) 
 }
 
 export function Projects({
-  beforeSwitch,
+  switchBoard,
   saveThumb,
 }: {
-  beforeSwitch: () => Promise<void>
+  switchBoard: (board: string) => Promise<void>
   saveThumb: () => Promise<void>
 }) {
   const [state, setState] = useState<State | null>(null)
@@ -339,11 +339,7 @@ export function Projects({
       setOpen(false)
       return
     }
-    void run(async () => {
-      void saveThumb()
-      await beforeSwitch()
-      await postJson('/api/projects/open', { name: p })
-    }, true)
+    void run(() => switchBoard(p), true)
   }
 
   const list = useMemo(() => {
@@ -408,12 +404,7 @@ export function Projects({
       if (ask.kind === 'rename') {
         const from = ask.target
         void run(() => postJson('/api/projects/move', { from, to: join(parent(from), name) }))
-      } else if (ask.kind === 'board')
-        void run(async () => {
-          void saveThumb()
-          await beforeSwitch()
-          await postJson('/api/projects/open', { name: join(dir, name) })
-        }, true)
+      } else if (ask.kind === 'board') void run(() => switchBoard(join(dir, name)), true)
       else void run(() => postJson('/api/projects/folder', { path: join(dir, name) }))
     } else if (ask.kind === 'delete') {
       void run(() => postJson('/api/projects/delete', { name: ask.target }))

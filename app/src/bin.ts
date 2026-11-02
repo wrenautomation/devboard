@@ -32,6 +32,21 @@ for (const [i, token] of argv.entries()) {
   }
 }
 
+// Local patch: DRAW_BOARD (set by bin/draw from the session's pin) names the board on every canvas request;
+// the server refuses it while another board is open (designs/2026-11-02-board-pins.md).
+const board = process.env.DRAW_BOARD
+if (board) {
+  const base = process.env.EXPRESS_SERVER_URL ?? 'http://127.0.0.1:3100'
+  const send = globalThis.fetch
+  globalThis.fetch = (input, init) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    if (!url.startsWith(base)) return send(input, init)
+    const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined))
+    headers.set('x-canvas-project', board)
+    return send(input, { ...init, headers })
+  }
+}
+
 if (argv.length === 0) {
   // MCP mode: stdout belongs to the JSON-RPC transport from here on
   const { runServer } = await import('./index.js')

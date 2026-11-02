@@ -11,7 +11,7 @@ import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types'
 import type { AppState, BinaryFileData, ExcalidrawImperativeAPI, SceneData } from '@excalidraw/excalidraw/types'
 import type { MermaidConfig } from '@excalidraw/mermaid-to-excalidraw'
 import { useEffect, useRef, useState } from 'react'
-import { fetchJson, getJson, post, postBinary, TAB } from './api'
+import { fetchJson, getJson, post, postBinary, postJson, TAB } from './api'
 import { type ExportImageOptions, exportForServer } from './export'
 import { IconPanel } from './IconPanel'
 import { Eraser, Shapes } from './icons'
@@ -90,17 +90,6 @@ interface WebSocketMessage {
   offsetY?: number
 }
 
-interface ApiResponse {
-  success: boolean
-  elements?: ServerElement[]
-  element?: ServerElement
-  files?: ServerFiles
-  project?: string
-  count?: number
-  error?: string
-  message?: string
-}
-
 type SyncStatus = 'idle' | 'syncing' | 'success' | 'error'
 type SceneLoadStatus = 'loading' | 'ready' | 'failed'
 const AUTO_SYNC_DEBOUNCE_MS = 1200
@@ -142,6 +131,8 @@ function App(): JSX.Element {
   // The board the scene on screen belongs to. projectRef moves at project_opened, before the new scene
   // arrives; drafts, syncs and thumbnails of the old scene must still name the old board.
   const sceneProjectRef = useRef<string | null>(null)
+  // The board the Mac has open, as this tab last heard. Differs from sceneProjectRef during a preview.
+  const serverBoardRef = useRef<string | null>(null)
   const thumbAtRef = useRef(0)
   // last thumbnailed state per board: an unchanged board is not rendered again
   const thumbKeyRef = useRef(new Map<string, string>())
@@ -326,12 +317,16 @@ function App(): JSX.Element {
     if (found.length) api.addFiles(found)
   }
   // Images a scene uses that the canvas lacks: this device first, then the Mac, one cached request each.
-  const loadSceneFiles = async (api: ExcalidrawImperativeAPI, els: readonly ExcalidrawElement[]): Promise<void> => {
+  const loadSceneFiles = async (
+    api: ExcalidrawImperativeAPI,
+    els: readonly ExcalidrawElement[],
+    board?: string,
+  ): Promise<void> => {
     const have = api.getFiles()
     const ids = [
       ...new Set(els.flatMap(el => (el.type === 'image' && el.fileId && !have[el.fileId] ? [el.fileId] : []))),
     ]
-    const found = await Promise.all(ids.map(async id => (await readFile(id)) ?? (await fetchFile(id))))
+    const found = await Promise.all(ids.map(async id => (await readFile(id)) ?? (await fetchFile(id, board))))
     const list = found.filter((f): f is BinaryFileData => !!f)
     for (const f of list) storedFilesRef.current.add(f.id)
     if (list.length) api.addFiles(list)
@@ -352,6 +347,97 @@ function App(): JSX.Element {
     loadedOnceRef.current = true
     setSceneShown(true)
     console.log(`Opened ${project} from this device: ${replica.elements.length} elements`)
+  }
+
+  // A board's scene from the Mac by delta: the tab names what it holds unchanged (scene on screen, else the
+  // board's replica); the Mac sends every id and only the elements that differ. Design: designs/2026-11-02-board-pins.md.
+  const pullScene = async (board: string): Promise<{ elements: ServerElement[]; fileIds: string[] }> => {
+    const api = excalidrawAPIRef.current
+    const same = loadedOnceRef.current && sceneProjectRef.current === board
+    const replica = same ? undefined : await readReplica(board)
+    const acked = same ? ackedRef.current : new Map(Object.entries(replica?.acked ?? {}))
+    const base = same && api ? api.getSceneElementsIncludingDeleted() : (replica?.elements ?? [])
+    const held = new Map(base.filter(el => acked.get(el.id) === stamp(el)).map(el => [el.id, el]))
+    const r = await postJson<{ ids: string[]; changed: ServerElement[]; fileIds: string[] }>(
+      '/api/projects/scene',
+      { name: board, have: Object.fromEntries([...held.values()].map(el => [el.id, stamp(el)])) },
+      TAB,
+    )
+    const changed = new Map(r.changed.map(el => [el.id, el]))
+    const elements = r.ids.map(id => changed.get(id) ?? (held.get(id) as unknown as ServerElement))
+    if (elements.some(el => !el)) throw new Error('Scene delta missed an element')
+    return { elements, fileIds: r.fileIds }
+  }
+
+  // Tap on a board: draw its replica at once; the Mac's delta merges when the switch lands.
+  const previewBoard = async (board: string): Promise<void> => {
+    const api = excalidrawAPIRef.current
+    if (!api || board === sceneProjectRef.current) return
+    saveReplicaNow(true)
+    const replica = await readReplica(board)
+    if (!replica?.elements.length) return
+    const generation = pauseSceneSync()
+    await loadSceneFiles(api, replica.elements, board)
+    if (generation !== sceneGenerationRef.current) return
+    projectRef.current = board
+    rememberProject(board)
+    window.dispatchEvent(new CustomEvent('canvas-project', { detail: board }))
+    ackedRef.current = new Map(Object.entries(replica.acked))
+    showScene(prepareServerScene(replica.elements), generation)
+    replicaVersionRef.current = sceneVersion(api.getSceneElementsIncludingDeleted())
+  }
+  const switchBoard = async (board: string): Promise<void> => {
+    void saveThumb()
+    await syncToBackend({ silent: true })
+    await previewBoard(board)
+    try {
+      await postJson('/api/projects/open', { name: board })
+    } catch (error) {
+      void loadExistingElements()
+      throw error
+    }
+  }
+
+  // Idle: bring the replicas (and images) of recent boards up to date, so a switch to one draws at once and
+  // pulls almost nothing. A board with edits not sent yet is left alone.
+  const preloadBoards = async (): Promise<void> => {
+    const list = await getJson<{ current: string; boards: { path: string; updated: number }[] }>('/api/projects')
+    if (!list) return
+    const recent = list.boards
+      .filter(b => b.path !== list.current)
+      .sort((a, b) => b.updated - a.updated)
+      .slice(0, 6)
+    for (const { path } of recent) {
+      const busy = () => sceneProjectRef.current === path || projectRef.current === path
+      const replica = await readReplica(path)
+      if (busy() || replica?.elements.some(el => replica.acked[el.id] !== stamp(el))) continue
+      const { elements, fileIds } = await pullScene(path).catch(() => ({ elements: null, fileIds: [] }))
+      if (!elements || busy()) continue
+      const fresh =
+        replica &&
+        elements.length === replica.elements.length &&
+        elements.every((el, i) => el === (replica.elements[i] as unknown))
+      if (!fresh) {
+        const prepared = prepareServerScene(elements.map(cleanElementForExcalidraw))
+        await writeReplica(path, {
+          elements: [...prepared],
+          acked: Object.fromEntries(elements.map(el => [el.id, stamp(el)])),
+        })
+      }
+      const wanted = new Set(fileIds)
+      for (const el of elements)
+        if (el.type === 'image' && el.fileId && wanted.has(el.fileId) && !(await readFile(el.fileId)))
+          await fetchFile(el.fileId, path)
+    }
+  }
+  const preloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const preloadAtRef = useRef(0)
+  // at most once a minute: a switch already pulls its own board
+  const preloadSoon = (): void => {
+    if (Date.now() - preloadAtRef.current < 60_000) return
+    preloadAtRef.current = Date.now()
+    if (preloadTimerRef.current) clearTimeout(preloadTimerRef.current)
+    preloadTimerRef.current = setTimeout(() => void preloadBoards().catch(() => {}), 4000)
   }
 
   // A full scene from the Mac. Merge per element with what this browser has not sent yet: the newer
@@ -397,6 +483,7 @@ function App(): JSX.Element {
     showScene(merged, generation, files)
     ackedRef.current = nextAcked
     saveReplicaNow(true)
+    preloadSoon()
     const pending = merged.filter(isPending).length
     if (pending) {
       console.log(`Merged ${pending} elements kept on this device into ${project}`)
@@ -596,21 +683,12 @@ function App(): JSX.Element {
     if (!excalidrawAPIRef.current) return
     const generation = pauseSceneSync()
     try {
-      // The tab sees scratch areas; agents do not.
-      const result = await fetchJson<ApiResponse>('/api/elements', { headers: TAB, timeoutMs: 10000 })
+      const open = await fetchJson<{ current: string }>('/api/projects', { timeoutMs: 10000 })
+      serverBoardRef.current = open.current
+      const [scene] = await Promise.all([pullScene(open.current), preloadCanvasFonts()])
       if (generation !== sceneGenerationRef.current) return
-      if (!result.success || !Array.isArray(result.elements)) {
-        throw new Error(result.error || 'Invalid scene response')
-      }
-      const filesResult = await fetchJson<{ ids?: string[] }>('/api/files?only=ids', { timeoutMs: 10000 })
-      if (generation !== sceneGenerationRef.current) return
-      if (!Array.isArray(filesResult.ids)) {
-        throw new Error('Could not load scene files')
-      }
-      rememberServerFiles(filesResult.ids)
-      await preloadCanvasFonts()
-      if (generation !== sceneGenerationRef.current) return
-      await applyLoadedScene(result.elements.map(cleanElementForExcalidraw), generation, undefined, result.project)
+      rememberServerFiles(scene.fileIds)
+      await applyLoadedScene(scene.elements.map(cleanElementForExcalidraw), generation, undefined, open.current)
     } catch (error) {
       failSceneLoad(error, generation)
     }
@@ -628,7 +706,8 @@ function App(): JSX.Element {
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${protocol}//${window.location.host}`
+    // scene=pull: no full scene on connect or switch; this tab pulls deltas (pullScene)
+    const wsUrl = `${protocol}//${window.location.host}/?scene=pull`
 
     const socket = new WebSocket(wsUrl)
     websocketRef.current = socket
@@ -674,6 +753,9 @@ function App(): JSX.Element {
     if (!excalidrawAPI) {
       return
     }
+
+    // an edit for the board the Mac still has open, while this tab previews the next one: the pull brings it
+    if (SCENE_MUTATIONS.has(data.type) && serverBoardRef.current !== sceneProjectRef.current) return
 
     if (SCENE_MUTATIONS.has(data.type) && sceneLoadStatusRef.current !== 'ready') {
       // An incremental event cannot prove that a failed or pending full load
@@ -772,9 +854,12 @@ function App(): JSX.Element {
             autoSyncTimerRef.current = null
           }
           projectRef.current = data.project ?? null
+          serverBoardRef.current = data.project ?? null
           if (data.project) rememberProject(data.project)
-          setSceneShown(false)
+          // a preview of this board stays on screen while its delta comes
+          if (sceneProjectRef.current !== data.project) setSceneShown(false)
           window.dispatchEvent(new CustomEvent('canvas-project', { detail: data.project }))
+          void loadExistingElements()
           break
 
         case 'project_renamed': {
@@ -782,6 +867,7 @@ function App(): JSX.Element {
           if (!from || !to) break
           if (projectRef.current === from) projectRef.current = to
           if (sceneProjectRef.current === from) sceneProjectRef.current = to
+          if (serverBoardRef.current === from) serverBoardRef.current = to
           void readReplica(from).then(r => r && writeReplica(to, r).then(() => dropReplica(from)))
           if (lastProject() === from) rememberProject(to)
           window.dispatchEvent(new CustomEvent('canvas-project', { detail: projectRef.current }))
@@ -1007,7 +1093,7 @@ function App(): JSX.Element {
     <div className="app" data-theme={theme}>
       {/* Header */}
       <div className="header">
-        <Projects beforeSwitch={() => syncToBackend({ silent: true })} saveThumb={saveThumb} />
+        <Projects switchBoard={switchBoard} saveThumb={saveThumb} />
         <button
           type="button"
           className={`btn-secondary icons-toggle ${iconsOpen ? 'on' : ''}`}

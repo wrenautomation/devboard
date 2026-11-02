@@ -10,19 +10,32 @@
 set -euo pipefail
 DIR="$(cd "$(dirname "$(realpath "$0")")/.." && pwd -P)"
 URL=http://127.0.0.1:3100
-cli() { EXPRESS_SERVER_URL=$URL EXCALIDRAW_NO_AUTOSTART=1 exec node "$DIR/app/dist/bin.js" "$@"; }
+cur="$(cat "$DIR/current" 2>/dev/null || echo main)"
+# Board pin (designs/2026-11-02-board-pins.md): every command names its board; the canvas refuses it while
+# another board is open. --board or DRAW_BOARD names it; else this Claude session's pin; else the open board
+# (pinned on a session's first command). `draw project open` moves the pin.
+board="${DRAW_BOARD:-}"; args=()
+while [ $# -gt 0 ]; do
+  case "$1" in --board) board="${2:?board}"; shift 2 ;; --board=*) board="${1#--board=}"; shift ;; *) args+=("$1"); shift ;; esac
+done
+set -- ${args[@]+"${args[@]}"}
+sid="${CLAUDE_CODE_SESSION_ID:-}"; sid="${sid//[^a-zA-Z0-9-]/}"; pin="${sid:+$DIR/pins/$sid}"
+if [ -z "$board" ] && [ -n "$pin" ] && [ -s "$pin" ]; then board="$(cat "$pin")"; fi
+if [ -z "$board" ]; then board="$cur"; [ -n "$pin" ] && { mkdir -p "$DIR/pins"; printf '%s\n' "$board" > "$pin"; }; fi
+cli() { DRAW_BOARD="$board" EXPRESS_SERVER_URL=$URL EXCALIDRAW_NO_AUTOSTART=1 exec node "$DIR/app/dist/bin.js" "$@"; }
 [ "${1:-}" = watch ] && EXPRESS_SERVER_URL=$URL exec node "$DIR/app/scripts/watch.mjs" "${@:2}"
 if [ "${1:-}" = icon ]; then
   [ "${2:-}" = --list ] && exec node "$DIR/library/icon.js" --list
   node "$DIR/library/icon.js" "${@:2}" | cli add; exit
 fi
 [ "${1:-}" = project ] || cli "$@"
-cur="$(cat "$DIR/current" 2>/dev/null || echo main)"
 case "${2:-}" in
   "") (cd "$DIR/projects" && find . -name canvas-state-v1.json -not -path './.git/*' | sed 's|^\./||; s|/canvas-state-v1.json$||' | sort) \
-        | while IFS= read -r p; do [ "$p" = "$cur" ] && echo "* $p" || echo "  $p"; done ;;
+        | while IFS= read -r p; do [ "$p" = "$cur" ] && echo "* $p" || echo "  $p"; done
+      [ "$board" = "$cur" ] || echo "this session's board: $board (not open)" >&2 ;;
   open)
     name="${3:?name}"; [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9\ _/-]*$ ]] || { echo "name: letters, digits, spaces, dashes; folders with /" >&2; exit 2; }
+    [ -n "$pin" ] && { mkdir -p "$DIR/pins"; printf '%s\n' "$name" > "$pin"; }
     [ "$name" = "$cur" ] && { echo "open: $name"; exit 0; }
     curl -sf -X POST -H 'content-type: application/json' -d "{\"name\":\"$name\"}" "$URL/api/projects/open" >/dev/null \
       && echo "open: $name" || { echo "could not open $name; see ~/Library/Logs/excalidraw-canvas.log" >&2; exit 1; } ;;

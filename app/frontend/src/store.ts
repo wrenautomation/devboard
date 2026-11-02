@@ -104,9 +104,11 @@ export const readFile = (id: string) =>
   idb<BinaryFileData | undefined>('readonly', st => st.get(`file:${id}`)).catch(() => undefined)
 export const writeFile = (f: BinaryFileData) => idb('readwrite', st => st.put(f, `file:${f.id}`)).catch(() => undefined)
 // One image from the Mac by id (immutable, HTTP-cached), kept on this device after.
-export const fetchFile = async (id: string): Promise<BinaryFileData | undefined> => {
+export const fetchFile = async (id: string, board?: string): Promise<BinaryFileData | undefined> => {
   try {
-    const raw = await getBlob(`/api/files/${encodeURIComponent(id)}`)
+    const raw = await getBlob(
+      `/api/files/${encodeURIComponent(id)}${board ? `?board=${encodeURIComponent(board)}` : ''}`,
+    )
     if (!raw) return undefined
     const mimeType = (raw.type.split(';')[0] || 'image/png') as BinaryFileData['mimeType']
     const dataURL = await new Promise<string>((resolve, reject) => {

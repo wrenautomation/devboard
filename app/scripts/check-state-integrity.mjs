@@ -184,7 +184,7 @@ async function seedUnsupportedSnapshot(name) {
   await request('/api/elements/clear', { method: 'DELETE' })
   await request('/api/elements/sync', {
     method: 'POST',
-    ...json({ elements: [{ id: 'web', type: 'embeddable', x: 0, y: 0, width: 300, height: 200 }] }),
+    ...json({ elements: [{ id: 'web', type: 'iframe', x: 0, y: 0, width: 300, height: 200 }] }),
   })
   await request('/api/snapshots', { method: 'POST', ...json({ name }) })
   await request('/api/elements/clear', { method: 'DELETE' })

@@ -2,6 +2,7 @@ import { createServer } from 'node:http'
 import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import compression from 'compression'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import express, { type NextFunction, type Request, type Response } from 'express'
@@ -14,6 +15,7 @@ import {
 import { isMainModule } from './core/entry.js'
 import { removePidFile, writePidFile } from './core/pidfile.js'
 import logger from './logger.js'
+import { CURRENT_FILE, currentProject, PROJECTS_DIR } from './server/boards.js'
 import { mountElements } from './server/elements.js'
 import { mountExport } from './server/export.js'
 import { mountFiles } from './server/files.js'
@@ -21,6 +23,7 @@ import { mountMedia } from './server/media.js'
 import { mountNotes } from './server/notes.js'
 import { mountProjects } from './server/projects.js'
 import { fail } from './server/reply.js'
+import { mountScene } from './server/scene.js'
 import { mountSnapshots } from './server/snapshots.js'
 import { mountViewport } from './server/viewport.js'
 import { attachWebSockets, clients } from './server/ws.js'
@@ -37,6 +40,8 @@ const server = createServer(app)
 
 // Middleware
 app.use(cors())
+// gzip JSON replies (scene deltas); media and images are already compressed
+app.use(compression())
 app.use(express.json({ limit: '10mb' }))
 
 // Serve static files from the build directory
@@ -48,6 +53,24 @@ app.use(express.static(path.join(__dirname, '../dist/frontend')))
 app.use('/assets/fonts', express.static(path.join(__dirname, '../node_modules/@excalidraw/excalidraw/dist/prod/fonts')))
 
 attachWebSockets(server)
+
+// Local patch: a request that names its board (x-canvas-project) runs only while that board is open, so a
+// switch between an agent's commands never lands its writes or reads on another board. Projects routes and
+// the media store take any board. Design: designs/2026-11-02-board-pins.md.
+const ANY_BOARD = /^\/(projects|media|notes)(\/|$)/
+app.use('/api', (req: Request, res: Response, next: NextFunction) => {
+  const raw = req.header('x-canvas-project')
+  if (!raw || !PROJECTS_DIR || !CURRENT_FILE || ANY_BOARD.test(req.path)) return next()
+  const want = raw,
+    open = currentProject()
+  if (want === open) return next()
+  res.status(409).json({
+    success: false,
+    error: `board "${want}" is not open ("${open}" is). Wait for it, or run: draw project open "${want}"`,
+    code: 'project_changed',
+    current: open,
+  })
+})
 
 // Routes, in the order they were registered when they all sat in this file.
 mountElements(app)
@@ -70,6 +93,7 @@ app.get('/', (_req: Request, res: Response) => {
 
 mountNotes(app)
 mountProjects(app)
+mountScene(app)
 
 app.get('/health', (_req: Request, res: Response) => {
   res.json({

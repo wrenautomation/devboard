@@ -21,7 +21,7 @@ import {
 } from './boards.js'
 import { fail } from './reply.js'
 import { isTab } from './scratch.js'
-import { broadcast, sceneMessage } from './ws.js'
+import { broadcast, broadcastScene } from './ws.js'
 
 const projectsOff = (res: Response): boolean => {
   if (PROJECTS_DIR && CURRENT_FILE) return false
@@ -35,7 +35,7 @@ const openBoard = (name: string) => {
   projectFs.writeFileSync(currentFile(), `${name}\n`)
   logger.info(`Opened project "${name}" (${elements.size} elements)`)
   broadcast({ type: 'project_opened', project: name })
-  broadcast(sceneMessage())
+  broadcastScene()
 }
 
 // Move or rename a board or a folder. The open board may be the one moved or inside it.
