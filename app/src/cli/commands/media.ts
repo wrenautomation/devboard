@@ -1,6 +1,6 @@
 import * as fs from 'node:fs'
 import { Readable } from 'node:stream'
-import { batchCreateElementsStrict } from '../../core/canvas-client.js'
+import { batchCreateElementsStrict, getElementFromCanvas, updateElementOnCanvas } from '../../core/canvas-client.js'
 import { EXPRESS_SERVER_URL } from '../../core/config.js'
 import { prepareElement } from '../../core/normalize.js'
 import { ensureCanvasRunning } from '../../core/spawn.js'
@@ -8,7 +8,8 @@ import type { ServerElement } from '../../types.js'
 import { CliUsageError, parseArgs } from '../args.js'
 import { printJson } from '../util.js'
 
-// video: upload an mp4 to the media store (designs/2026-11-02-media.md), place it as a media embed
+// video: upload an mp4 to the media store (designs/2026-11-02-media.md), place it as a media embed.
+// --id of an existing element: swap its video in place (same spot and width), so a re-shot film replaces the old
 export async function video(argv: string[]): Promise<void> {
   const { positionals, flags } = parseArgs(argv, { width: { takesValue: true }, id: { takesValue: true } })
   const [file, xs, ys] = positionals
@@ -34,8 +35,24 @@ export async function video(argv: string[]): Promise<void> {
   }
   if (!res.ok || !meta.success) throw new Error(meta.error ?? `upload failed: HTTP ${res.status}`)
 
-  const width = Number(flags.width ?? 240)
+  const id = typeof flags.id === 'string' ? flags.id : undefined
+  const old = id ? await getElementFromCanvas(id) : null
+  const width = flags.width !== undefined ? Number(flags.width) : (old?.width ?? 240)
   const height = Math.round((width * meta.height) / Math.max(1, meta.width))
+  if (old && id) {
+    const at = xs !== undefined ? { x: Number(xs), y: Number(ys ?? old.y) } : {}
+    await updateElementOnCanvas({ id, link: meta.src, width, height, ...at })
+    return printJson({
+      success: true,
+      id,
+      src: meta.src,
+      bytes: meta.bytes,
+      reused: meta.reused,
+      width,
+      height,
+      replaced: true,
+    })
+  }
   const element = prepareElement({
     type: 'embeddable',
     x: Number(xs ?? 0),
@@ -46,7 +63,7 @@ export async function video(argv: string[]): Promise<void> {
     strokeWidth: 0,
     backgroundColor: 'transparent',
     roundness: { type: 3 },
-    ...(typeof flags.id === 'string' ? { id: flags.id } : {}),
+    ...(id ? { id } : {}),
   } as never) as ServerElement
   const [created] = await batchCreateElementsStrict([element])
   printJson({ success: true, id: created?.id, src: meta.src, bytes: meta.bytes, reused: meta.reused, width, height })
