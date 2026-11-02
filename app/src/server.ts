@@ -17,6 +17,7 @@ import logger from './logger.js'
 import { mountElements } from './server/elements.js'
 import { mountExport } from './server/export.js'
 import { mountFiles } from './server/files.js'
+import { mountMedia } from './server/media.js'
 import { mountNotes } from './server/notes.js'
 import { mountProjects } from './server/projects.js'
 import { fail } from './server/reply.js'
@@ -51,6 +52,7 @@ attachWebSockets(server)
 // Routes, in the order they were registered when they all sat in this file.
 mountElements(app)
 mountFiles(app)
+mountMedia(app)
 mountExport(app)
 mountViewport(app)
 mountSnapshots(app)

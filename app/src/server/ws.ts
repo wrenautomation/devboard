@@ -19,7 +19,8 @@ export function sceneMessage(): InitialElementsMessage {
     type: 'initial_elements',
     elements: Array.from(elements.values()),
     project: currentProject(),
-    ...(files.size > 0 ? { files: Object.fromEntries(files) } : {}),
+    // ids only: a tab keeps each image (IndexedDB) and gets a missing one from /api/files/:id
+    fileIds: [...files.keys()],
   }
 }
 
@@ -40,7 +41,7 @@ export function broadcast(message: WebSocketMessage): void {
 
 // The ping loop and the connection handler, on the http server the app listens on.
 export function attachWebSockets(server: Server): void {
-  const wss = new WebSocketServer({ server })
+  const wss = new WebSocketServer({ server, perMessageDeflate: { threshold: 1024 } })
   // WebSocket connection handling
   // Ping every 25s. A link with no traffic through the tunnel stays open, and a client with no pong is dropped.
   const ponged = new WeakMap<WebSocket, boolean>()

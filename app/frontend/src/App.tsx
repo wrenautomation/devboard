@@ -15,6 +15,7 @@ import { fetchJson, getJson, post, postBinary, TAB } from './api'
 import { type ExportImageOptions, exportForServer } from './export'
 import { IconPanel } from './IconPanel'
 import { Eraser, Shapes } from './icons'
+import { renderEmbeddable, validateEmbeddable } from './Media'
 import { Notify } from './Notify'
 import { Projects } from './Projects'
 import { Scratch, withoutScratch } from './Scratch'
@@ -23,6 +24,7 @@ import { StrokeWidth } from './StrokeWidth'
 import {
   asFileMap,
   dropReplica,
+  fetchFile,
   lastProject,
   libraryAdapter,
   readFile,
@@ -68,6 +70,7 @@ interface WebSocketMessage {
   elements?: ServerElement[]
   elementId?: string
   files?: ServerFiles | BinaryFileData[]
+  fileIds?: string[]
   fileId?: string
   project?: string
   from?: string
@@ -140,10 +143,17 @@ function App(): JSX.Element {
   // arrives; drafts, syncs and thumbnails of the old scene must still name the old board.
   const sceneProjectRef = useRef<string | null>(null)
   const thumbAtRef = useRef(0)
+  // last thumbnailed state per board: an unchanged board is not rendered again
+  const thumbKeyRef = useRef(new Map<string, string>())
   const saveThumb = async () => {
     const api = excalidrawAPIRef.current,
       project = sceneProjectRef.current
-    if (api && project) await postThumb(api, project).catch(() => {})
+    if (!api || !project) return
+    const els = api.getSceneElementsIncludingDeleted()
+    const key = `${els.length}:${els.reduce((n, el) => n + el.version, 0)}`
+    if (thumbKeyRef.current.get(project) === key) return
+    thumbKeyRef.current.set(project, key)
+    await postThumb(api, project).catch(() => thumbKeyRef.current.delete(project))
   }
   // The thumbnail renders the whole board on the main thread (~0.2s on 400 strokes): wait until the pen is up.
   const penDownRef = useRef(false)
@@ -213,8 +223,9 @@ function App(): JSX.Element {
   const serverFileIdsRef = useRef<Set<string>>(new Set())
   const rememberServerFiles = (files: unknown): void => {
     const list = Array.isArray(files) ? files : Object.values((files as Record<string, unknown>) || {})
-    for (const file of list as { id?: unknown }[]) {
-      if (typeof file?.id === 'string') serverFileIdsRef.current.add(file.id)
+    for (const file of list as ({ id?: unknown } | string)[]) {
+      const id = typeof file === 'string' ? file : file?.id
+      if (typeof id === 'string') serverFileIdsRef.current.add(id)
     }
   }
   const [sceneLoadStatus, setSceneLoadStatus] = useState<SceneLoadStatus>('loading')
@@ -314,6 +325,17 @@ function App(): JSX.Element {
     const found = (await Promise.all(ids.map(readFile))).filter((f): f is BinaryFileData => !!f)
     if (found.length) api.addFiles(found)
   }
+  // Images a scene uses that the canvas lacks: this device first, then the Mac, one cached request each.
+  const loadSceneFiles = async (api: ExcalidrawImperativeAPI, els: readonly ExcalidrawElement[]): Promise<void> => {
+    const have = api.getFiles()
+    const ids = [
+      ...new Set(els.flatMap(el => (el.type === 'image' && el.fileId && !have[el.fileId] ? [el.fileId] : []))),
+    ]
+    const found = await Promise.all(ids.map(async id => (await readFile(id)) ?? (await fetchFile(id))))
+    const list = found.filter((f): f is BinaryFileData => !!f)
+    for (const f of list) storedFilesRef.current.add(f.id)
+    if (list.length) api.addFiles(list)
+  }
 
   // Open the board from this browser at once, before (or without) the Mac. The Mac's scene merges in later.
   const openReplica = async (): Promise<void> => {
@@ -370,7 +392,7 @@ function App(): JSX.Element {
     const fromMac = new Map(incoming.map(el => [el.id, stamp(el)]))
     const nextAcked = new Map<string, string>()
     for (const el of merged) if (fromMac.get(el.id) === stamp(el)) nextAcked.set(el.id, stamp(el))
-    if (!same && local.length) await addStoredFiles(api, local, files)
+    await loadSceneFiles(api, merged)
     if (generation !== sceneGenerationRef.current) return
     showScene(merged, generation, files)
     ackedRef.current = nextAcked
@@ -580,19 +602,15 @@ function App(): JSX.Element {
       if (!result.success || !Array.isArray(result.elements)) {
         throw new Error(result.error || 'Invalid scene response')
       }
-      const filesResult = await fetchJson<ApiResponse>('/api/files', { timeoutMs: 10000 })
+      const filesResult = await fetchJson<{ ids?: string[] }>('/api/files?only=ids', { timeoutMs: 10000 })
       if (generation !== sceneGenerationRef.current) return
-      if (!filesResult.files) {
+      if (!Array.isArray(filesResult.ids)) {
         throw new Error('Could not load scene files')
       }
+      rememberServerFiles(filesResult.ids)
       await preloadCanvasFonts()
       if (generation !== sceneGenerationRef.current) return
-      await applyLoadedScene(
-        result.elements.map(cleanElementForExcalidraw),
-        generation,
-        filesResult.files,
-        result.project,
-      )
+      await applyLoadedScene(result.elements.map(cleanElementForExcalidraw), generation, undefined, result.project)
     } catch (error) {
       failSceneLoad(error, generation)
     }
@@ -675,6 +693,7 @@ function App(): JSX.Element {
             // Measure the first scene with the real fonts, not a fallback
             await preloadCanvasFonts()
             if (generation !== sceneGenerationRef.current) return
+            rememberServerFiles(data.fileIds)
             await applyLoadedScene(
               data.elements.map(cleanElementForExcalidraw),
               generation,
@@ -1060,6 +1079,8 @@ function App(): JSX.Element {
         >
           <Excalidraw
             viewModeEnabled={!sceneShown}
+            validateEmbeddable={validateEmbeddable}
+            renderEmbeddable={renderEmbeddable}
             excalidrawAPI={(api: ExcalidrawAPIRefValue) => setExcalidrawAPI(api)}
             onChange={(_elements, appState) => {
               if (appState?.theme && appState.theme !== theme) {

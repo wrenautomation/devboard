@@ -4,6 +4,7 @@ import { CliUsageError } from './args.js'
 import { arrange } from './commands/arrange.js'
 import * as elements from './commands/elements.js'
 import { installSkill } from './commands/install-skill.js'
+import { video } from './commands/media.js'
 import { render } from './commands/render.js'
 import * as scene from './commands/scene.js'
 import * as server from './commands/server.js'
@@ -73,6 +74,11 @@ const COMMANDS: Record<string, Command> = {
     handler: scene.mermaid,
     summary: 'Render a Mermaid diagram onto the canvas (needs a browser tab)',
     usage: 'mermaid [diagram.mmd|-] (or stdin)',
+  },
+  video: {
+    handler: video,
+    summary: 'Upload an mp4 to the media store and place it (plays on screen, poster in screenshots)',
+    usage: 'video <file.mp4> [x y] [--width 240] [--id <id>]',
   },
   snapshot: {
     handler: snapshot,

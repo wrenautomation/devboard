@@ -340,8 +340,8 @@ export function Projects({
       return
     }
     void run(async () => {
+      void saveThumb()
       await beforeSwitch()
-      await saveThumb()
       await postJson('/api/projects/open', { name: p })
     }, true)
   }
@@ -410,8 +410,8 @@ export function Projects({
         void run(() => postJson('/api/projects/move', { from, to: join(parent(from), name) }))
       } else if (ask.kind === 'board')
         void run(async () => {
+          void saveThumb()
           await beforeSwitch()
-          await saveThumb()
           await postJson('/api/projects/open', { name: join(dir, name) })
         }, true)
       else void run(() => postJson('/api/projects/folder', { path: join(dir, name) }))

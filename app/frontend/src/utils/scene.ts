@@ -112,6 +112,9 @@ const isImageElement = (element: Partial<ExcalidrawElement>): boolean => {
   return element.type === 'image'
 }
 
+// media embeds pass through whole, like frames (the skeleton converter does not take them)
+const isEmbeddable = (element: Partial<ExcalidrawElement>): boolean => element.type === 'embeddable'
+
 const isFreedrawElement = (element: Partial<ExcalidrawElement>): boolean => {
   return element.type === 'freedraw'
 }
@@ -356,7 +359,11 @@ export const assertScenePreserved = (
 
 const byIndex = <T extends { index?: unknown }>(list: readonly T[]): T[] =>
   [...list].sort((a, b) =>
-    typeof a.index === 'string' && typeof b.index === 'string' && a.index !== b.index ? (a.index < b.index ? -1 : 1) : 0,
+    typeof a.index === 'string' && typeof b.index === 'string' && a.index !== b.index
+      ? a.index < b.index
+        ? -1
+        : 1
+      : 0,
   )
 
 export const prepareServerScene = (
@@ -401,7 +408,7 @@ export const prepareServerScene = (
   // Native frames express membership through the children's frameId. The
   // skeleton converter instead requires frame.children and recalculates bounds.
   const skeletons = withStableLabelIds(
-    validated.filter(el => !isFrame(el) && !isImageElement(el) && !isFreedrawElement(el)),
+    validated.filter(el => !isFrame(el) && !isEmbeddable(el) && !isImageElement(el) && !isFreedrawElement(el)),
   )
   const converted = preserveCallerGeometry(
     restoreBindings(
@@ -427,13 +434,14 @@ export const prepareServerScene = (
   // array order, and inserts a new stroke at its frame's array slot.
   const ordered = byIndex(validated).flatMap(element => {
     const id = element.id ?? ''
-    const next = isFrame(element)
-      ? element
-      : isImageElement(element)
-        ? normalizeImageElement(element)
-        : isFreedrawElement(element)
-          ? normalizeFreedrawElement(element)
-          : convertedById.get(id)
+    const next =
+      isFrame(element) || isEmbeddable(element)
+        ? element
+        : isImageElement(element)
+          ? normalizeImageElement(element)
+          : isFreedrawElement(element)
+            ? normalizeFreedrawElement(element)
+            : convertedById.get(id)
     if (!next) throw new Error(`Scene conversion lost element ${id}`)
     return [next, ...(generatedText.get(id) || [])]
   })

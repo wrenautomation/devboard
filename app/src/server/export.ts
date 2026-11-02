@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { MAX_SCALE, RenderError, renderScene } from '../core/render/index.js'
 import logger from '../logger.js'
 import { elements, files, generateId } from '../types.js'
+import { withPosters } from './media.js'
 import { fail } from './reply.js'
 import { scratchHidden, visibleTo } from './scratch.js'
 import { broadcast, clients, sceneMessage } from './ws.js'
@@ -112,7 +113,7 @@ export function mountExport(app: Express): void {
 
     try {
       const { renderer: _renderer, ...renderOptions } = options
-      const scene = { elements: visibleTo(req, Array.from(elements.values())), files: Object.fromEntries(files) }
+      const scene = withPosters(visibleTo(req, Array.from(elements.values())), Object.fromEntries(files))
       const result = await renderScene(scene, renderOptions)
       res.json({
         success: true,

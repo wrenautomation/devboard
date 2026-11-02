@@ -117,6 +117,7 @@ export type ExcalidrawElementType =
   | 'line'
   | 'freedraw'
   | 'image'
+  | 'embeddable'
   | 'frame'
   | 'magicframe'
 
@@ -130,6 +131,7 @@ export const EXCALIDRAW_ELEMENT_TYPES: Record<string, ExcalidrawElementType> = {
   FREEDRAW: 'freedraw',
   LINE: 'line',
   IMAGE: 'image',
+  EMBEDDABLE: 'embeddable',
   FRAME: 'frame',
 } as const
 
@@ -221,6 +223,7 @@ export interface InitialElementsMessage extends WebSocketMessage {
   type: 'initial_elements'
   elements: ServerElement[]
   project?: string
+  fileIds?: string[]
 }
 
 export interface ElementCreatedMessage extends WebSocketMessage {

@@ -75,8 +75,21 @@ function prepareFileWrites(fileList: unknown[]): ExcalidrawFile[] {
 export function mountFiles(app: Express): void {
   // ─── Files API (for image elements) ───────────────────────────
   // GET all files
-  app.get('/api/files', (_req: Request, res: Response) => {
+  app.get('/api/files', (req: Request, res: Response) => {
+    if (req.query.only === 'ids') return void res.json({ ids: [...files.keys()] })
     res.json({ files: Object.fromEntries(files) })
+  })
+
+  // Local patch: one image as raw bytes. An id never changes its bytes (see prepareFileWrites): cache forever.
+  app.get('/api/files/:id', (req: Request, res: Response) => {
+    const file = files.get(req.params.id as string)
+    if (!file) return fail(res, 404, 'no such file')
+    const comma = file.dataURL.indexOf(',')
+    const body = file.dataURL.slice(comma + 1)
+    res.set('Cache-Control', 'private, max-age=31536000, immutable')
+    res
+      .type(file.mimeType)
+      .send(file.dataURL.slice(0, comma).endsWith(';base64') ? Buffer.from(body, 'base64') : decodeURIComponent(body))
   })
 
   // POST add/update files (batch)

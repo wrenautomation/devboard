@@ -45,6 +45,12 @@ export async function postJson<T>(url: string, body: unknown, headers: Headers =
   return reply.data
 }
 
+// GET raw bytes (an image by id); null when absent or the server is away.
+export const getBlob = (url: string): Promise<Blob | null> =>
+  fetch(url)
+    .then(r => (r.ok ? r.blob() : null))
+    .catch(() => null)
+
 // POST raw bytes (a thumbnail).
 export async function postBinary(url: string, body: Blob, headers: Headers): Promise<void> {
   await fetch(url, { method: 'POST', headers: { 'content-type': body.type, ...headers }, body })

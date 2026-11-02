@@ -3,7 +3,7 @@
 import type { LibraryPersistedData, LibraryPersistenceAdapter } from '@excalidraw/excalidraw/data/library'
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types'
 import type { BinaryFileData, LibraryItems } from '@excalidraw/excalidraw/types'
-import { loadPack } from './api'
+import { getBlob, loadPack } from './api'
 
 const LIBRARY_STORAGE_KEY = 'excalidraw-canvas-library'
 
@@ -103,6 +103,25 @@ export const dropReplica = (project: string) =>
 export const readFile = (id: string) =>
   idb<BinaryFileData | undefined>('readonly', st => st.get(`file:${id}`)).catch(() => undefined)
 export const writeFile = (f: BinaryFileData) => idb('readwrite', st => st.put(f, `file:${f.id}`)).catch(() => undefined)
+// One image from the Mac by id (immutable, HTTP-cached), kept on this device after.
+export const fetchFile = async (id: string): Promise<BinaryFileData | undefined> => {
+  try {
+    const raw = await getBlob(`/api/files/${encodeURIComponent(id)}`)
+    if (!raw) return undefined
+    const mimeType = (raw.type.split(';')[0] || 'image/png') as BinaryFileData['mimeType']
+    const dataURL = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result))
+      reader.onerror = () => reject(reader.error)
+      reader.readAsDataURL(new Blob([raw], { type: mimeType }))
+    })
+    const file = { id, dataURL, mimeType, created: Date.now() } as BinaryFileData
+    void writeFile(file)
+    return file
+  } catch {
+    return undefined
+  }
+}
 // The server's files: a map by id (a scene) or a list (files_added); the canvas wants the map.
 export type ServerFiles = Record<string, BinaryFileData>
 export const asFileMap = (files: ServerFiles | BinaryFileData[] | undefined): ServerFiles | undefined =>
