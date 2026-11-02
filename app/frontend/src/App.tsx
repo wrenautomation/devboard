@@ -15,7 +15,7 @@ import { fetchJson, getJson, post, postBinary, postJson, TAB } from './api'
 import { type ExportImageOptions, exportForServer } from './export'
 import { IconPanel } from './IconPanel'
 import { Eraser, Shapes } from './icons'
-import { renderEmbeddable, validateEmbeddable } from './Media'
+import { openMedia, renderEmbeddable, validateEmbeddable } from './Media'
 import { Notify } from './Notify'
 import { Projects } from './Projects'
 import { Scratch, withoutScratch } from './Scratch'
@@ -1167,6 +1167,7 @@ function App(): JSX.Element {
             viewModeEnabled={!sceneShown}
             validateEmbeddable={validateEmbeddable}
             renderEmbeddable={renderEmbeddable}
+            onLinkOpen={openMedia}
             excalidrawAPI={(api: ExcalidrawAPIRefValue) => setExcalidrawAPI(api)}
             onChange={(_elements, appState) => {
               if (appState?.theme && appState.theme !== theme) {
