@@ -1,8 +1,6 @@
 import {
   CaptureUpdateAction,
-  convertToExcalidrawElements,
   Excalidraw,
-  exportToBlob,
   newElementWith,
   reconcileElements,
   useHandleLibrary,
@@ -11,14 +9,15 @@ import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types'
 import type { AppState, BinaryFileData, ExcalidrawImperativeAPI, SceneData } from '@excalidraw/excalidraw/types'
 import type { MermaidConfig } from '@excalidraw/mermaid-to-excalidraw'
 import { useEffect, useRef, useState } from 'react'
-import { fetchJson, getJson, post, postBinary, postJson, TAB } from './api'
+import { fetchJson, getJson, post, postJson, TAB } from './api'
+import { BoardLoading } from './BoardLoading'
 import { type ExportImageOptions, exportForServer } from './export'
 import { IconPanel } from './IconPanel'
 import { Eraser, Shapes } from './icons'
 import { openMedia, renderEmbeddable, validateEmbeddable } from './Media'
 import { Notify } from './Notify'
 import { Projects } from './Projects'
-import { Scratch, withoutScratch } from './Scratch'
+import { Scratch } from './Scratch'
 import { SelectionDelete } from './SelectionDelete'
 import { StrokeWidth } from './StrokeWidth'
 import {
@@ -37,26 +36,13 @@ import {
   writeReplica,
 } from './store'
 import { Touch } from './Touch'
+import { useThumbs } from './thumbs'
 import { canvasFontsLoaded, preloadCanvasFonts } from './utils/fonts'
-import { convertMermaidToExcalidraw, DEFAULT_MERMAID_CONFIG } from './utils/mermaidConverter'
+import { importMermaid } from './utils/mermaidConverter'
 import type { ServerElement } from './utils/scene'
 import { assertScenePreserved, cleanElementForExcalidraw, prepareServerScene } from './utils/scene'
 import { Voice } from './Voice'
 import { applyViewport } from './viewport'
-
-// Local patch: thumbnail of the open board for the Projects view; scratch areas are left out.
-async function postThumb(api: ExcalidrawImperativeAPI, project: string) {
-  const elements = withoutScratch(api.getSceneElements())
-  if (!elements.length) return
-  const blob = await exportToBlob({
-    elements,
-    files: api.getFiles(),
-    maxWidthOrHeight: 480,
-    mimeType: 'image/png',
-    appState: { ...api.getAppState(), exportBackground: true, exportWithDarkMode: false },
-  })
-  await postBinary('/api/projects/thumb', blob, { ...TAB, 'x-canvas-project': project })
-}
 
 // Type definitions
 type ExcalidrawAPIRefValue = ExcalidrawImperativeAPI
@@ -133,37 +119,11 @@ function App(): JSX.Element {
   const sceneProjectRef = useRef<string | null>(null)
   // The board the Mac has open, as this tab last heard. Differs from sceneProjectRef during a preview.
   const serverBoardRef = useRef<string | null>(null)
-  const thumbAtRef = useRef(0)
-  // last thumbnailed state per board: an unchanged board is not rendered again
-  const thumbKeyRef = useRef(new Map<string, string>())
-  const saveThumb = async () => {
-    const api = excalidrawAPIRef.current,
-      project = sceneProjectRef.current
-    if (!api || !project) return
-    const els = api.getSceneElementsIncludingDeleted()
-    const key = `${els.length}:${els.reduce((n, el) => n + el.version, 0)}`
-    if (thumbKeyRef.current.get(project) === key) return
-    thumbKeyRef.current.set(project, key)
-    await postThumb(api, project).catch(() => thumbKeyRef.current.delete(project))
-  }
-  // The thumbnail renders the whole board on the main thread (~0.2s on 400 strokes): wait until the pen is up.
-  const penDownRef = useRef(false)
-  const thumbSoon = (): void => {
-    setTimeout(() => (penDownRef.current ? thumbSoon() : void saveThumb()), 1500)
-  }
-  useEffect(() => {
-    const up = () => {
-      penDownRef.current = false
-    }
-    window.addEventListener('pointerup', up)
-    window.addEventListener('pointercancel', up)
-    return () => {
-      window.removeEventListener('pointerup', up)
-      window.removeEventListener('pointercancel', up)
-    }
-  }, [])
+  const thumbs = useThumbs(excalidrawAPIRef, sceneProjectRef)
   // Per element of the scene's board: the version the Mac confirmed. See Replica.
   const ackedRef = useRef<Map<string, string>>(new Map())
+  // Boards whose text was sized with this device's loaded fonts (see Replica.measured)
+  const measuredRef = useRef<Set<string>>(new Set())
   const isPending = (el: ExcalidrawElement): boolean => ackedRef.current.get(el.id) !== stamp(el)
   const replicaTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const replicaVersionRef = useRef<number>(-1)
@@ -277,6 +237,7 @@ function App(): JSX.Element {
     void writeReplica(project, {
       elements: all.filter(el => !el.isDeleted || isPending(el)),
       acked: Object.fromEntries(ackedRef.current),
+      measured: measuredRef.current.has(project),
     })
     for (const f of Object.values(api.getFiles())) {
       if (!storedFilesRef.current.has(f.id)) {
@@ -290,7 +251,7 @@ function App(): JSX.Element {
     if (replicaTimerRef.current) return
     replicaTimerRef.current = setTimeout(() => {
       replicaTimerRef.current = null
-      if (penDownRef.current) replicaSoon()
+      if (thumbs.penDown.current) replicaSoon()
       else saveReplicaNow()
     }, 400)
   }
@@ -351,7 +312,9 @@ function App(): JSX.Element {
 
   // A board's scene from the Mac by delta: the tab names what it holds unchanged (scene on screen, else the
   // board's replica); the Mac sends every id and only the elements that differ. Design: designs/2026-11-02-board-pins.md.
-  const pullScene = async (board: string): Promise<{ elements: ServerElement[]; fileIds: string[] }> => {
+  const pullScene = async (
+    board: string,
+  ): Promise<{ elements: ServerElement[]; fileIds: string[]; unchanged: boolean }> => {
     const api = excalidrawAPIRef.current
     const same = loadedOnceRef.current && sceneProjectRef.current === board
     const replica = same ? undefined : await readReplica(board)
@@ -366,36 +329,61 @@ function App(): JSX.Element {
     const changed = new Map(r.changed.map(el => [el.id, el]))
     const elements = r.ids.map(id => changed.get(id) ?? (held.get(id) as unknown as ServerElement))
     if (elements.some(el => !el)) throw new Error('Scene delta missed an element')
-    return { elements, fileIds: r.fileIds }
+    // the scene on screen is the Mac's, element for element, with nothing waiting to go up
+    const live = new Set(base.flatMap(el => (el.isDeleted ? [] : [el.id])))
+    const unchanged =
+      same &&
+      !r.changed.length &&
+      base.every(el => acked.get(el.id) === stamp(el)) &&
+      live.size === r.ids.length &&
+      r.ids.every(id => live.has(id))
+    return { elements, fileIds: r.fileIds, unchanged }
   }
 
   // Tap on a board: draw its replica at once; the Mac's delta merges when the switch lands.
-  const previewBoard = async (board: string): Promise<void> => {
+  const previewBoard = async (board: string): Promise<boolean> => {
     const api = excalidrawAPIRef.current
-    if (!api || board === sceneProjectRef.current) return
-    saveReplicaNow(true)
+    if (!api || board === sceneProjectRef.current) return false
+    saveReplicaNow()
     const replica = await readReplica(board)
-    if (!replica?.elements.length) return
+    if (!replica?.elements.length) return false
     const generation = pauseSceneSync()
     await loadSceneFiles(api, replica.elements, board)
-    if (generation !== sceneGenerationRef.current) return
+    if (generation !== sceneGenerationRef.current) return false
     projectRef.current = board
     rememberProject(board)
     window.dispatchEvent(new CustomEvent('canvas-project', { detail: board }))
     ackedRef.current = new Map(Object.entries(replica.acked))
-    showScene(prepareServerScene(replica.elements), generation)
+    if (replica.measured) measuredRef.current.add(board)
+    // already prepared: shown here before, or by the preload; no second conversion
+    showScene(replica.elements, generation)
     replicaVersionRef.current = sceneVersion(api.getSceneElementsIncludingDeleted())
+    return true
   }
+  // Tap: the replica draws at once; open and pull run together (a closed board takes no writes, so the pull
+  // cannot go stale before the open). The old board's thumbnail renders after the new board is up.
+  const switchingRef = useRef<string | null>(null)
+  const [loadingBoard, setLoadingBoard] = useState<string | null>(null)
   const switchBoard = async (board: string): Promise<void> => {
-    void saveThumb()
+    performance.mark('devboard:switch', { detail: { board } })
+    const shot = thumbs.shot()
     await syncToBackend({ silent: true })
-    await previewBoard(board)
+    switchingRef.current = board
     try {
-      await postJson('/api/projects/open', { name: board })
+      const shown = await previewBoard(board)
+      if (!shown) setLoadingBoard(board)
+      // no replica: the old board stays on screen, paused, until the new one lands
+      const generation = shown ? sceneGenerationRef.current : pauseSceneSync()
+      const [, scene] = await Promise.all([postJson('/api/projects/open', { name: board }), pullScene(board)])
+      await landScene(board, scene, generation)
     } catch (error) {
       void loadExistingElements()
       throw error
+    } finally {
+      switchingRef.current = null
+      setLoadingBoard(null)
     }
+    if (shot) thumbs.soon(shot)
   }
 
   // Idle: bring the replicas (and images) of recent boards up to date, so a switch to one draws at once and
@@ -417,11 +405,13 @@ function App(): JSX.Element {
         replica &&
         elements.length === replica.elements.length &&
         elements.every((el, i) => el === (replica.elements[i] as unknown))
-      if (!fresh) {
-        const prepared = prepareServerScene(elements.map(cleanElementForExcalidraw))
+      const measured = canvasFontsLoaded()
+      if (!fresh || (measured && !replica?.measured)) {
+        const prepared = prepareServerScene(elements.map(cleanElementForExcalidraw), { refreshDimensions: measured })
         await writeReplica(path, {
           elements: [...prepared],
           acked: Object.fromEntries(elements.map(el => [el.id, stamp(el)])),
+          measured,
         })
       }
       const wanted = new Set(fileIds)
@@ -571,6 +561,8 @@ function App(): JSX.Element {
     setSceneLoadStatus('ready')
     setSceneShown(true)
     loadedOnceRef.current = true
+    // switch timing: scripts/switch-bench.mjs
+    performance.mark('devboard:scene', { detail: { board: sceneProjectRef.current, n: prepared.length } })
   }
 
   // Elements the Mac sent one by one (an agent's edit, another tab's push, a push's losers). An element
@@ -679,16 +671,42 @@ function App(): JSX.Element {
     }
   }, [excalidrawAPI])
 
-  const loadExistingElements = async (): Promise<void> => {
+  // A pulled scene lands. Nothing changed and the text already sized here: the scene on screen stays as is.
+  // Else the full merge, which sizes text with the loaded fonts.
+  const landScene = async (
+    board: string,
+    scene: Awaited<ReturnType<typeof pullScene>>,
+    generation: number,
+  ): Promise<void> => {
+    if (generation !== sceneGenerationRef.current) return
+    serverBoardRef.current = board
+    rememberServerFiles(scene.fileIds)
+    if (scene.unchanged && measuredRef.current.has(board)) {
+      sceneLoadStatusRef.current = 'ready'
+      setSceneLoadStatus('ready')
+      setSceneShown(true)
+      preloadSoon()
+      return
+    }
+    await preloadCanvasFonts()
+    if (generation !== sceneGenerationRef.current) return
+    const measured = canvasFontsLoaded()
+    await applyLoadedScene(scene.elements.map(cleanElementForExcalidraw), generation, undefined, board)
+    if (measured && generation === sceneGenerationRef.current) {
+      measuredRef.current.add(board)
+      saveReplicaNow(true)
+    }
+  }
+
+  // board: the one the Mac just opened (project_opened), which saves asking for it
+  const loadExistingElements = async (board?: string): Promise<void> => {
     if (!excalidrawAPIRef.current) return
     const generation = pauseSceneSync()
     try {
-      const open = await fetchJson<{ current: string }>('/api/projects', { timeoutMs: 10000 })
-      serverBoardRef.current = open.current
-      const [scene] = await Promise.all([pullScene(open.current), preloadCanvasFonts()])
+      const current = board ?? (await fetchJson<{ current: string }>('/api/projects', { timeoutMs: 10000 })).current
       if (generation !== sceneGenerationRef.current) return
-      rememberServerFiles(scene.fileIds)
-      await applyLoadedScene(scene.elements.map(cleanElementForExcalidraw), generation, undefined, open.current)
+      serverBoardRef.current = current
+      await landScene(current, await pullScene(current), generation)
     } catch (error) {
       failSceneLoad(error, generation)
     }
@@ -859,7 +877,8 @@ function App(): JSX.Element {
           // a preview of this board stays on screen while its delta comes
           if (sceneProjectRef.current !== data.project) setSceneShown(false)
           window.dispatchEvent(new CustomEvent('canvas-project', { detail: data.project }))
-          void loadExistingElements()
+          // this tab's own switch pulls its board itself
+          if (data.project !== switchingRef.current) void loadExistingElements(data.project ?? undefined)
           break
 
         case 'project_renamed': {
@@ -896,53 +915,24 @@ function App(): JSX.Element {
             )
           break
 
-        case 'mermaid_convert':
-          console.log('Received Mermaid conversion request from MCP')
-          if (data.mermaidDiagram) {
-            try {
-              if (!canSyncScene()) throw new Error('Scene is not fully loaded; Mermaid import is paused')
-              const generation = sceneGenerationRef.current
-              const result = await convertMermaidToExcalidraw(
-                data.mermaidDiagram,
-                data.config || DEFAULT_MERMAID_CONFIG,
-              )
-              if (!canSyncScene() || generation !== sceneGenerationRef.current) return
-
-              if (result.error) {
-                console.error('Mermaid conversion error:', result.error)
-                return
-              }
-
-              if (result.elements && result.elements.length > 0) {
-                // Regenerate ids so repeated conversions of the same diagram
-                // (mermaid emits stable ids like "A", "B") can't collide with
-                // elements already on the canvas.
-                const convertedElements = convertToExcalidrawElements(
-                  [...result.elements] as Parameters<typeof convertToExcalidrawElements>[0],
-                  { regenerateIds: true },
-                )
-                // Merge with the existing scene — updateScene() replaces the
-                // element list wholesale, and syncToBackend() would otherwise
-                // propagate that wipe to the server.
-                applySceneUpdateWithoutAutoSync(excalidrawAPI, {
-                  elements: [...excalidrawAPI.getSceneElements(), ...convertedElements],
-                  captureUpdate: CaptureUpdateAction.IMMEDIATELY,
-                })
-
-                if (result.files) {
-                  excalidrawAPI.addFiles(Object.values(result.files))
-                }
-
-                console.log('Mermaid diagram converted successfully:', result.elements.length, 'elements')
-
-                // Sync to backend automatically after creating elements
-                await syncToBackend()
-              }
-            } catch (error) {
-              console.error('Error converting Mermaid diagram from WebSocket:', error)
-            }
+        case 'mermaid_convert': {
+          if (!data.mermaidDiagram) break
+          try {
+            if (!canSyncScene()) throw new Error('Scene is not fully loaded; Mermaid import is paused')
+            const generation = sceneGenerationRef.current
+            const n = await importMermaid(
+              excalidrawAPI,
+              data.mermaidDiagram,
+              data.config,
+              scene => applySceneUpdateWithoutAutoSync(excalidrawAPI, scene),
+              () => canSyncScene() && generation === sceneGenerationRef.current,
+            )
+            if (n) await syncToBackend()
+          } catch (error) {
+            console.error('Mermaid import failed:', error)
           }
           break
+        }
 
         default:
           console.log('Unknown WebSocket message type:', data.type)
@@ -1019,11 +1009,7 @@ function App(): JSX.Element {
         for (const a of result.applied) ackedRef.current.set(a.id, stamp(a))
         if (result.rejected.length) mergeRemote(result.rejected.map(cleanElementForExcalidraw))
         saveReplicaNow(true)
-        // A fresh thumbnail at most once a minute while the board changes.
-        if (Date.now() - thumbAtRef.current > 60_000) {
-          thumbAtRef.current = Date.now()
-          thumbSoon()
-        }
+        thumbs.changed()
 
         if (!silent) {
           setSyncStatus('success')
@@ -1093,7 +1079,7 @@ function App(): JSX.Element {
     <div className="app" data-theme={theme}>
       {/* Header */}
       <div className="header">
-        <Projects switchBoard={switchBoard} saveThumb={saveThumb} />
+        <Projects switchBoard={switchBoard} saveThumb={() => thumbs.save()} />
         <button
           type="button"
           className={`btn-secondary icons-toggle ${iconsOpen ? 'on' : ''}`}
@@ -1134,29 +1120,24 @@ function App(): JSX.Element {
         </div>
       </div>
 
-      {sceneLoadStatus !== 'ready' && !sceneShown && (
-        <div className="scene-load-status" role={sceneLoadStatus === 'failed' ? 'alert' : 'status'}>
-          <span>
-            {sceneLoadStatus === 'failed'
-              ? 'Canvas could not be loaded. Sync is paused to protect your saved scene.'
-              : 'Loading canvas. Sync is paused until the scene is ready.'}
-          </span>
-          {sceneLoadStatus === 'failed' && (
-            <button type="button" className="btn-secondary" onClick={() => void loadExistingElements()}>
-              Retry loading
-            </button>
-          )}
+      {sceneLoadStatus === 'failed' && !sceneShown && (
+        <div className="scene-load-status" role="alert">
+          <span>Canvas could not be loaded. Sync is paused to protect your saved scene.</span>
+          <button type="button" className="btn-secondary" onClick={() => void loadExistingElements()}>
+            Retry loading
+          </button>
         </div>
       )}
 
       {/* Canvas Container */}
       <div className="canvas-container">
+        <BoardLoading board={loadingBoard ?? (sceneLoadStatus === 'loading' && !sceneShown ? lastProject() : null)} />
         <StrokeWidth api={excalidrawAPI as ExcalidrawImperativeAPI | null} />
         <Touch api={excalidrawAPI as ExcalidrawImperativeAPI | null} />
         <div
           onPointerDownCapture={() => {
             userInteractedRef.current = true
-            penDownRef.current = true
+            thumbs.penDown.current = true
           }}
           onKeyDownCapture={() => {
             userInteractedRef.current = true

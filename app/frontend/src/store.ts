@@ -66,7 +66,8 @@ export const libraryAdapter: LibraryPersistenceAdapter = {
 // Local patch: offline first. Each board has a replica in this browser: its elements and, per element,
 // the version the Mac last confirmed (acked). An element whose version differs from its ack is pending:
 // the next push sends it. The Mac keeps the newer version of each element, so a retry is safe.
-export type Replica = { elements: ExcalidrawElement[]; acked: Record<string, string> }
+// measured: text sizes come from this device's loaded fonts, so a switch need not measure again
+export type Replica = { elements: ExcalidrawElement[]; acked: Record<string, string>; measured?: boolean }
 const replicaKey = (project: string) => `replica:${project}`
 export const stamp = (el: { version?: number; versionNonce?: number }) => `${el.version}:${el.versionNonce ?? 0}`
 // The board to open from the replica when the Mac can't be reached.
@@ -93,12 +94,28 @@ const idb = async <T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => 
     req.onerror = () => reject(req.error)
   })
 }
-export const readReplica = (project: string) =>
-  idb<Replica | undefined>('readonly', st => st.get(replicaKey(project))).catch(() => undefined)
-export const writeReplica = (project: string, r: Replica) =>
-  idb('readwrite', st => st.put(r, replicaKey(project))).catch(() => undefined)
-export const dropReplica = (project: string) =>
-  idb('readwrite', st => st.delete(replicaKey(project))).catch(() => undefined)
+// recent replicas in memory: an IndexedDB read clones the whole board (0.2-0.5 s on a busy iPad)
+const recent = new Map<string, Replica>()
+const remember = (project: string, r: Replica) => {
+  recent.delete(project)
+  recent.set(project, r)
+  if (recent.size > 8) recent.delete(recent.keys().next().value as string)
+}
+export const readReplica = async (project: string): Promise<Replica | undefined> => {
+  const hit = recent.get(project)
+  if (hit) return hit
+  const r = await idb<Replica | undefined>('readonly', st => st.get(replicaKey(project))).catch(() => undefined)
+  if (r) remember(project, r)
+  return r
+}
+export const writeReplica = (project: string, r: Replica) => {
+  remember(project, r)
+  return idb('readwrite', st => st.put(r, replicaKey(project))).catch(() => undefined)
+}
+export const dropReplica = (project: string) => {
+  recent.delete(project)
+  return idb('readwrite', st => st.delete(replicaKey(project))).catch(() => undefined)
+}
 // Image data once per file, apart from the replica: it never changes, and it is the bulk of the bytes.
 export const readFile = (id: string) =>
   idb<BinaryFileData | undefined>('readonly', st => st.get(`file:${id}`)).catch(() => undefined)

@@ -76,6 +76,24 @@ button:disabled, .nt-send:disabled { cursor: default; opacity: .45; transform: n
 .canvas-container { flex: 1; min-height: 0; width: 100%; position: relative; }
 .scene-load-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 20px; background: color-mix(in srgb, var(--warn) 15%, var(--paper)); color: color-mix(in srgb, var(--warn) 70%, var(--ink)); box-shadow: 0 1px 0 var(--hair); }
 
+/* Board loading: over the canvas while a board with no replica loads; the pen draws, then lifts. */
+.board-loading { position: absolute; inset: 0; z-index: 60; display: grid; place-items: center; pointer-events: none; opacity: 0;
+  background: color-mix(in srgb, var(--canvas) 45%, transparent); -webkit-backdrop-filter: blur(6px) saturate(130%); backdrop-filter: blur(6px) saturate(130%);
+  transition: opacity .22s var(--ease); }
+.board-loading.on { opacity: 1; pointer-events: auto; transition-delay: .15s; }
+.board-loading-card { display: inline-flex; align-items: center; gap: 12px; padding: 12px 18px 12px 14px; border-radius: var(--leaf-c); background: var(--paper);
+  box-shadow: var(--lift); color: var(--ink-2); font-size: 15px; transform: translateY(6px) scale(.98); transition: transform .35s var(--spring); }
+.board-loading.on .board-loading-card { transform: none; transition-delay: .15s; }
+.board-loading-card b { color: var(--ink); font-weight: 650; }
+.board-loading-pen { width: 44px; height: 20px; overflow: visible; }
+.board-loading-pen path { fill: none; stroke: var(--accent); stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round;
+  stroke-dasharray: 100; stroke-dashoffset: 100; animation: board-pen 1.6s var(--ease) infinite; }
+@keyframes board-pen { 0% { stroke-dashoffset: 100; } 55% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -100; } }
+@media (prefers-reduced-motion: reduce) {
+  .board-loading, .board-loading-card { transition: none; }
+  .board-loading-pen path { animation: none; stroke-dashoffset: 0; opacity: .7; }
+}
+
 
 /* Projects: the breadcrumb in the header opens the Files-style sheet. */
 .pj-crumb { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 6px 12px 6px 8px; border: 0; border-radius: var(--leaf-c); background: none; color: var(--ink); font-size: 16px; }

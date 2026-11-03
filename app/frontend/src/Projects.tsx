@@ -339,7 +339,14 @@ export function Projects({
       setOpen(false)
       return
     }
-    void run(() => switchBoard(p), true)
+    // close at tap: the canvas shows the switch; a failure reopens the sheet with its error
+    setOpen(false)
+    void run(() =>
+      switchBoard(p).catch(e => {
+        setOpen(true)
+        throw e
+      }),
+    )
   }
 
   const list = useMemo(() => {

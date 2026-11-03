@@ -32,3 +32,17 @@ Priorities: never a write on the wrong board > William never blocked > no agent 
 - gzip/brotli on JSON replies (`compression`), deflate on WebSocket.
 
 Result (emulated iPad, 4x CPU, 20 Mbps, 60 ms): Strata 2.5 s → 0.27 s; Birdwatch system 1.8 s → 0.33 s, pull 0 of 1332 changed.
+
+## Switch, round 2
+
+William: a switch still took seconds on the iPad. Bench (`app/scripts/switch-bench.mjs`): each switch drew the board twice, and the main thread was blocked 0.6–2.3 s.
+
+- Cost: IndexedDB read 180–470 ms (it clones the whole board); a second full convert 180–310 ms; an extra `GET /api/projects` 160–430 ms; the open round trip waited 0.6–1.6 s behind the busy main thread.
+- Memory replicas: an LRU of 8 boards in front of IndexedDB.
+- One draw: the preview draws the replica as stored, with no convert. If the pull finds no change, that draw is final.
+- `Replica.measured`: true when text was sized with this device's loaded fonts. An unmeasured replica gets one full apply, so the Safari clip fix (2d33d62) still holds.
+- Open and pull run in parallel. Board pins (409) keep the closed board free of writes.
+- Loader: `BoardLoading` covers the canvas only when no replica exists. It fades in after 150 ms, so a fast switch never shows it.
+- Sheet closes at tap; a failure opens it again with the error.
+
+Result, from the click event: final scene 1.2–1.8 s → 25–170 ms; main thread blocked up to 2.3 s → 0–370 ms. The first visit to a board whose replica is unmeasured draws twice.
