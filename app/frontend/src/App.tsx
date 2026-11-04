@@ -19,6 +19,7 @@ import { Notify } from './Notify'
 import { Projects } from './Projects'
 import { Scratch } from './Scratch'
 import { SelectionDelete } from './SelectionDelete'
+import { Snap } from './Snap'
 import { StrokeWidth } from './StrokeWidth'
 import {
   asFileMap,
@@ -1134,6 +1135,7 @@ function App(): JSX.Element {
         <BoardLoading board={loadingBoard ?? (sceneLoadStatus === 'loading' && !sceneShown ? lastProject() : null)} />
         <StrokeWidth api={excalidrawAPI as ExcalidrawImperativeAPI | null} />
         <Touch api={excalidrawAPI as ExcalidrawImperativeAPI | null} />
+        <Snap api={excalidrawAPI as ExcalidrawImperativeAPI | null} />
         <div
           onPointerDownCapture={() => {
             userInteractedRef.current = true
