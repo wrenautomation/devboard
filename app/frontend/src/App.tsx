@@ -11,6 +11,7 @@ import type { MermaidConfig } from '@excalidraw/mermaid-to-excalidraw'
 import { useEffect, useRef, useState } from 'react'
 import { fetchJson, getJson, post, postJson, TAB } from './api'
 import { BoardLoading } from './BoardLoading'
+import { Colors } from './Colors'
 import { type ExportImageOptions, exportForServer } from './export'
 import { IconPanel } from './IconPanel'
 import { Eraser, Shapes } from './icons'
@@ -1136,6 +1137,7 @@ function App(): JSX.Element {
         <StrokeWidth api={excalidrawAPI as ExcalidrawImperativeAPI | null} />
         <Touch api={excalidrawAPI as ExcalidrawImperativeAPI | null} />
         <Snap api={excalidrawAPI as ExcalidrawImperativeAPI | null} />
+        <Colors api={excalidrawAPI as ExcalidrawImperativeAPI | null} />
         <div
           onPointerDownCapture={() => {
             userInteractedRef.current = true

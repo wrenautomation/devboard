@@ -3,12 +3,12 @@
 // tool that draws. The width row replaces Excalidraw's three fixed widths inside that panel: four presets
 // and a slider for any width. It sets the pen default and the selected shapes.
 
-import { CaptureUpdateAction } from '@excalidraw/excalidraw'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { edited } from './edits'
+import { restyle } from './edits'
 import { ChevronDown } from './icons'
+import { useSlots } from './slots'
 
 const PRESETS: [number, string][] = [
   [0.5, 'Fine'],
@@ -33,7 +33,7 @@ export function StrokeWidth({ api }: { api: ExcalidrawImperativeAPI | null }) {
   const [color, setColor] = useState('#1e1e1e')
   const [shown, setShown] = useState(false)
   const [hidden, setHidden] = useState(remembered)
-  const [slot, setSlot] = useState<HTMLElement | null>(null)
+  const slot = useSlots('.selected-shape-actions fieldset:has(input[name="stroke-width"])', 'sw-slot')[0]
 
   // Follow the selection, or the pen default when nothing is selected.
   useEffect(() => {
@@ -51,24 +51,6 @@ export function StrokeWidth({ api }: { api: ExcalidrawImperativeAPI | null }) {
     return api.onChange(read)
   }, [api])
 
-  // Excalidraw mounts its panel per selection and tool; put the width row in its stroke width fieldset each time.
-  useEffect(() => {
-    const find = () => {
-      const set = document.querySelector('.selected-shape-actions fieldset:has(input[name="stroke-width"])')
-      let el = set?.querySelector<HTMLElement>(':scope > .sw-slot') ?? null
-      if (set && !el) {
-        el = document.createElement('div')
-        el.className = 'sw-slot'
-        set.appendChild(el)
-      }
-      setSlot(prev => (prev === el ? prev : el))
-    }
-    find()
-    const mo = new MutationObserver(find)
-    mo.observe(document.body, { childList: true, subtree: true })
-    return () => mo.disconnect()
-  }, [])
-
   useEffect(() => {
     document.documentElement.dataset.styleHidden = hidden ? '1' : '0'
     try {
@@ -82,14 +64,7 @@ export function StrokeWidth({ api }: { api: ExcalidrawImperativeAPI | null }) {
     if (!api) return
     const value = Math.min(MAX, Math.max(MIN, Math.round(w * 100) / 100))
     setWidth(value)
-    const picked = api.getAppState().selectedElementIds
-    api.updateScene({
-      appState: { currentItemStrokeWidth: value },
-      elements: api
-        .getSceneElementsIncludingDeleted()
-        .map(e => (picked[e.id] && !e.isDeleted ? edited(e, { strokeWidth: value }) : e)),
-      captureUpdate: CaptureUpdateAction.IMMEDIATELY,
-    })
+    restyle(api, { currentItemStrokeWidth: value }, { strokeWidth: value })
   }
 
   return (
